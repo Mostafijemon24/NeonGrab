@@ -32,6 +32,7 @@ export type DownloadJob = {
   openUri?: string;
   mimeType?: string;
   native?: boolean;
+  errorMessage?: string;
 };
 
 export type EngineCallbacks = {
@@ -120,6 +121,7 @@ export class DownloadEngine {
         const job = this.jobs.get(e.jobId);
         if (!job) return;
         job.status = "failed";
+        job.errorMessage = e.message;
         job.speedBps = 0;
         this.running = Math.max(0, this.running - 1);
         this.callbacks.onUpdate({ ...job });
@@ -169,6 +171,7 @@ export class DownloadEngine {
       existing.filePath = undefined;
       existing.openUri = undefined;
       existing.mimeType = undefined;
+      existing.errorMessage = undefined;
       existing.native = this.nativeReady;
       this.callbacks.onUpdate(existing);
       this.pump();

@@ -51,7 +51,8 @@ public final class SafFileHelper {
         }
     }
 
-    public static SavedFileResult exportToTree(Context context, Uri treeUri, File sourceFile)
+    public static SavedFileResult exportToTree(
+            Context context, Uri treeUri, File sourceFile, String titleHint)
             throws Exception {
         if (sourceFile == null || !sourceFile.exists() || sourceFile.length() == 0) {
             throw new Exception("Downloaded file not found or empty");
@@ -64,8 +65,12 @@ public final class SafFileHelper {
 
         String fileName = sourceFile.getName();
         String mime = guessMime(fileName);
-        String base = baseNameWithoutExtension(fileName);
         String ext = extensionOf(fileName);
+        String base =
+                sanitizeBaseName(
+                        titleHint != null && !titleHint.isEmpty()
+                                ? baseNameWithoutExtension(titleHint)
+                                : baseNameWithoutExtension(fileName));
 
         DocumentFile dest = tree.createFile(mime, base);
         if (dest == null) {
@@ -95,14 +100,25 @@ public final class SafFileHelper {
         String displayPath =
                 folderName.isEmpty() ? savedName : folderName + "/" + savedName;
 
-        return new SavedFileResult(displayPath, dest.getUri().toString(), mime);
+        return new SavedFileResult(
+                displayPath, dest.getUri().toString(), mime, sourceFile.length());
     }
 
     public static SavedFileResult fromLocalFile(Context context, File file) throws Exception {
         String authority = context.getPackageName() + ".fileprovider";
         Uri uri = FileProvider.getUriForFile(context, authority, file);
         String mime = guessMime(file.getName());
-        return new SavedFileResult(file.getAbsolutePath(), uri.toString(), mime);
+        return new SavedFileResult(
+                file.getAbsolutePath(), uri.toString(), mime, file.length());
+    }
+
+    private static String sanitizeBaseName(String name) {
+        if (name == null || name.isEmpty()) return "download";
+        String cleaned = name.replaceAll("[\\\\/:*?\"<>|\\[\\]]", "_").trim();
+        cleaned = cleaned.replaceAll("\\s+", " ");
+        if (cleaned.isEmpty()) return "download";
+        if (cleaned.length() > 80) cleaned = cleaned.substring(0, 80).trim();
+        return cleaned;
     }
 
     private static String baseNameWithoutExtension(String name) {

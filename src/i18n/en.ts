@@ -28,7 +28,14 @@ export const en = {
   folderPickerAndroidOnly: "Folder picker works on the Android app",
   openingFolderPicker: "Opening picker…",
   folderPickCancelled: "Folder selection cancelled",
-  engineNotReady: "Download engine is installing. Check internet and try again in Settings.",
+  engineNotReady:
+    "Download engine is not ready. Open Settings, tap Setup engine, and wait on Wi‑Fi.",
+  setupEngine: "Setup download engine",
+  engineSettingUp: "Setting up engine…",
+  engineReady: "Download engine ready",
+  engineInstallTitle: "Installing download engine",
+  engineInstallHint:
+    "First-time setup unpacks the download engine (~1–2 min). Keep the app open; Wi‑Fi helps optional updates.",
   folderRequired: "Choose a download folder in Settings first.",
   savedTo: "Saved to {path}",
   installingEngine: "Installing download engine…",

@@ -30,7 +30,14 @@ export const bn: Record<TranslationKey, string> = {
   folderPickerAndroidOnly: "ফোল্ডার পিকার শুধু Android অ্যাপে",
   openingFolderPicker: "পিকার খোলা হচ্ছে…",
   folderPickCancelled: "ফোল্ডার বাছাই বাতিল",
-  engineNotReady: "ডাউনলোড ইঞ্জিন ইনস্টল হচ্ছে। ইন্টারনেট চেক করে Settings থেকে আবার চেষ্টা করুন।",
+  engineNotReady:
+    "ডাউনলোড ইঞ্জিন প্রস্তুত নয়। Settings খুলে Setup engine চাপুন, Wi‑Fi এ অপেক্ষা করুন।",
+  setupEngine: "ডাউনলোড ইঞ্জিন সেটআপ",
+  engineSettingUp: "ইঞ্জিন সেটআপ হচ্ছে…",
+  engineReady: "ডাউনলোড ইঞ্জিন প্রস্তুত",
+  engineInstallTitle: "ডাউনলোড ইঞ্জিন ইনস্টল হচ্ছে",
+  engineInstallHint:
+    "প্রথমবার ইঞ্জিন আনপ্যাক হয় (~১–২ মিনিট)। অ্যাপ খোলা রাখুন; আপডেটের জন্য Wi‑Fi ভালো।",
   folderRequired: "আগে Settings থেকে ডাউনলোড ফোল্ডার বেছে নিন।",
   savedTo: "{path} এ সংরক্ষিত",
   installingEngine: "ডাউনলোড ইঞ্জিন ইনস্টল হচ্ছে…",

@@ -38,8 +38,16 @@ export function QueueItem({ job, onPause, onResume, onCancel }: Props) {
               {job.title}
             </p>
             <p className="text-[#9f9fa9] text-[11px]">
-              {formatBytes(job.totalBytes)} · {tr("segments", { n: job.segments })}
+              {formatBytes(
+                job.status === "completed" ? job.downloadedBytes : job.totalBytes,
+              )}{" "}
+              · {tr("segments", { n: job.segments })}
             </p>
+            {job.status === "failed" && job.errorMessage ? (
+              <p className="text-[#a78bfa] text-[10px] truncate mt-0.5" title={job.errorMessage}>
+                {job.errorMessage}
+              </p>
+            ) : null}
           </div>
           <span
             className="font-semibold text-xs leading-4 shrink-0"

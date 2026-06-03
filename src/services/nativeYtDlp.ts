@@ -2,6 +2,16 @@ import { Capacitor } from "@capacitor/core";
 import { YtDlp, type YtDlpAvailability, type YtDlpQuality } from "@/plugins/yt-dlp";
 
 export type { YtDlpAvailability };
+
+export type EngineSetupProgressEvent = {
+  progress: number;
+  message: string;
+};
+
+export type EngineSetupFailedEvent = {
+  message: string;
+};
+
 import type { MediaKind, ResolvedItem } from "./urlResolver";
 
 let cachedAvailability: YtDlpAvailability | null = null;
@@ -24,6 +34,75 @@ export async function getYtDlpAvailability(
   }
 }
 
+export function subscribeEngineSetupEvents(handlers: {
+  onProgress: (e: EngineSetupProgressEvent) => void;
+  onComplete: () => void;
+  onFailed: (e: EngineSetupFailedEvent) => void;
+}): () => void {
+  if (Capacitor.getPlatform() !== "android") {
+    return () => {};
+  }
+
+  const removers: Array<() => void> = [];
+  let cancelled = false;
+
+  void (async () => {
+    const [p, c, f] = await Promise.all([
+      YtDlp.addListener("engineSetupProgress", (e) => {
+        if (!cancelled) handlers.onProgress(e);
+      }),
+      YtDlp.addListener("engineSetupComplete", () => {
+        if (!cancelled) handlers.onComplete();
+      }),
+      YtDlp.addListener("engineSetupFailed", (e) => {
+        if (!cancelled) handlers.onFailed(e);
+      }),
+    ]);
+    if (cancelled) {
+      p.remove();
+      c.remove();
+      f.remove();
+      return;
+    }
+    removers.push(() => p.remove(), () => c.remove(), () => f.remove());
+  })();
+
+  return () => {
+    cancelled = true;
+    removers.forEach((r) => r());
+  };
+}
+
+export async function setupDownloadEngine(retry = false): Promise<YtDlpAvailability> {
+  if (Capacitor.getPlatform() !== "android") {
+    return { available: false, message: "Not Android" };
+  }
+  cachedAvailability = null;
+  ensurePromise = null;
+  try {
+    const result = await YtDlp.ensureEngine({ retry });
+    cachedAvailability = await getYtDlpAvailability(true);
+    if (result.ok) {
+      cachedAvailability = {
+        ...cachedAvailability,
+        available: true,
+        version: result.version ?? cachedAvailability.version,
+      };
+    } else if (result.message) {
+      cachedAvailability = {
+        ...cachedAvailability,
+        available: false,
+        message: result.message,
+      };
+    }
+    return cachedAvailability;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Engine setup failed";
+    cachedAvailability = { available: false, message: msg };
+    return cachedAvailability;
+  }
+}
+
 export async function ensureYtDlpBinary(): Promise<boolean> {
   if (Capacitor.getPlatform() !== "android") return false;
   if (ensurePromise) return ensurePromise;
@@ -31,29 +110,8 @@ export async function ensureYtDlpBinary(): Promise<boolean> {
   ensurePromise = (async () => {
     const status = await getYtDlpAvailability(true);
     if (status.available) return true;
-
-    try {
-      const engine = await YtDlp.ensureEngine();
-      if (engine.ok) {
-        cachedAvailability = await YtDlp.isAvailable();
-        return cachedAvailability.available;
-      }
-    } catch {
-      /* ignore */
-    }
-
-    try {
-      const assets = await YtDlp.installBinaryFromAssets();
-      if (assets.ok) {
-        cachedAvailability = await YtDlp.isAvailable();
-        return cachedAvailability.available;
-      }
-    } catch {
-      /* ignore */
-    }
-
-    cachedAvailability = await getYtDlpAvailability(true);
-    return cachedAvailability.available;
+    const after = await setupDownloadEngine(false);
+    return after.available;
   })();
 
   try {

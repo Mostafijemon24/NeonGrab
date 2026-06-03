@@ -5,10 +5,12 @@ public final class SavedFileResult {
     public final String displayPath;
     public final String openUri;
     public final String mimeType;
+    public final long sizeBytes;
 
-    public SavedFileResult(String displayPath, String openUri, String mimeType) {
+    public SavedFileResult(String displayPath, String openUri, String mimeType, long sizeBytes) {
         this.displayPath = displayPath;
         this.openUri = openUri;
         this.mimeType = mimeType;
+        this.sizeBytes = sizeBytes;
     }
 }

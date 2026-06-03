@@ -1,6 +1,7 @@
 package com.neongrab.downloader.ytdlp;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import androidx.activity.result.ActivityResult;
@@ -21,6 +22,8 @@ public class YtDlpPlugin extends Plugin {
     @Override
     public void load() {
         super.load();
+        YtDlpEngineHelper.setProgressListener(
+                (percent, message) -> emitEngineSetupProgress(percent, message));
         executor =
                 new YtDlpExecutor(
                         getContext(),
@@ -71,20 +74,48 @@ public class YtDlpPlugin extends Plugin {
 
     @Override
     protected void handleOnDestroy() {
+        YtDlpEngineHelper.setProgressListener(null);
         if (executor != null) executor.shutdown();
         super.handleOnDestroy();
     }
 
+    private void emitEngineSetupProgress(int progress, String message) {
+        JSObject data = new JSObject();
+        data.put("progress", progress);
+        data.put("message", message);
+        notifyListeners("engineSetupProgress", data);
+        if (progress >= 100) {
+            JSObject done = new JSObject();
+            done.put("ready", true);
+            notifyListeners("engineSetupComplete", done);
+        }
+    }
+
+    private void emitEngineSetupFailed(String message) {
+        JSObject fail = new JSObject();
+        fail.put("message", message);
+        notifyListeners("engineSetupFailed", fail);
+    }
+
     @PluginMethod
     public void isAvailable(PluginCall call) {
-        boolean installed = YtDlpBinaryProvider.isInstalled(getContext());
+        Context ctx = getContext();
+        boolean installed = YtDlpBinaryProvider.isInstalled(ctx);
         JSObject ret = new JSObject();
         ret.put("available", installed);
+        ret.put("initializing", YtDlpEngineHelper.isSetupInProgress());
         if (installed) {
-            ret.put("version", YtDlpBinaryProvider.getVersion(getContext()));
+            ret.put("version", YtDlpBinaryProvider.getVersion(ctx));
             ret.put("binaryPath", "bundled");
         } else {
-            ret.put("message", "Download engine will install on first download");
+            String err = YtDlpEngineHelper.getLastError();
+            if (YtDlpEngineHelper.isSetupInProgress()) {
+                ret.put("message", "Installing download engine…");
+            } else if (err != null && !err.isEmpty()) {
+                ret.put("message", err);
+            } else {
+                ret.put("message", "Tap Setup engine below (needs Wi‑Fi or mobile data)");
+            }
         }
         call.resolve(ret);
     }
@@ -102,17 +133,26 @@ public class YtDlpPlugin extends Plugin {
 
     @PluginMethod
     public void ensureEngine(PluginCall call) {
+        boolean retry = Boolean.TRUE.equals(call.getBoolean("retry", false));
         poolExecute(
                 call,
                 () -> {
                     YtDlpBinaryProvider.InstallResult result =
-                            YtDlpBinaryProvider.ensureInstalled(getContext());
+                            retry
+                                    ? YtDlpBinaryProvider.retryInstall(getContext())
+                                    : YtDlpBinaryProvider.ensureInstalled(getContext());
                     JSObject ret = new JSObject();
                     ret.put("ok", result.ok);
-                    if (!result.ok) ret.put("message", result.message);
-                    else {
+                    if (!result.ok) {
+                        ret.put("message", result.message);
+                        emitEngineSetupFailed(
+                                result.message != null
+                                        ? result.message
+                                        : "Engine setup failed");
+                    } else {
                         ret.put("path", result.path);
                         ret.put("version", YtDlpBinaryProvider.getVersion(getContext()));
+                        emitEngineSetupProgress(100, "Download engine ready");
                     }
                     call.resolve(ret);
                 });

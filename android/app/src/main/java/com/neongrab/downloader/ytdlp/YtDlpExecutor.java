@@ -39,6 +39,9 @@ public class YtDlpExecutor {
     private static final Pattern PROGRESS_RE =
             Pattern.compile("\\[download\\]\\s+(\\d+(?:\\.\\d+)?)%");
 
+    private static final Pattern SPEED_RE =
+            Pattern.compile("at\\s+([\\d.]+)\\s*([KMG]?i?B)/s", Pattern.CASE_INSENSITIVE);
+
     private static final Set<String> MEDIA_EXT =
             new HashSet<>(
                     Arrays.asList(
@@ -129,14 +132,31 @@ public class YtDlpExecutor {
                                         context,
                                         jobId,
                                         args,
-                                        (progress, etaInSeconds) -> {
+                                        (progress, etaInSeconds, line) -> {
                                             if (job.cancelled.get() || job.paused.get()) {
                                                 return;
                                             }
                                             int pct = Math.min(99, Math.round(progress));
                                             long downloaded = (totalEstimate * pct) / 100;
+                                            long speedBps = parseSpeedBps(line);
+                                            if (pct <= 0 && line != null) {
+                                                Matcher pm = PROGRESS_RE.matcher(line);
+                                                if (pm.find()) {
+                                                    pct =
+                                                            Math.min(
+                                                                    99,
+                                                                    Math.round(
+                                                                            Float.parseFloat(
+                                                                                    pm.group(1))));
+                                                    downloaded = (totalEstimate * pct) / 100;
+                                                }
+                                            }
                                             emitter.emitProgress(
-                                                    jobId, pct, downloaded, totalEstimate, 0);
+                                                    jobId,
+                                                    pct,
+                                                    downloaded,
+                                                    totalEstimate,
+                                                    speedBps);
                                         });
 
                         log.append(response.getOut()).append('\n').append(response.getErr());
@@ -144,53 +164,40 @@ public class YtDlpExecutor {
                         jobs.remove(jobId);
                         if (job.cancelled.get()) return;
 
-                        if (response.getExitCode() != 0) {
-                            emitter.emitFailed(
-                                    jobId,
-                                    tailLog(log, "yt-dlp failed (code " + response.getExitCode() + ")"));
-                            return;
-                        }
-
                         parseProgressFromLog(log, jobId, totalEstimate);
 
                         File saved = findLatestMedia(tempDir);
                         if (saved == null || saved.length() == 0) {
-                            emitter.emitFailed(jobId, tailLog(log, "Downloaded file not found"));
+                            String reason = extractFailureReason(log);
+                            emitter.emitFailed(
+                                    jobId,
+                                    reason != null
+                                            ? reason
+                                            : tailLog(
+                                                    log,
+                                                    "Downloaded file not found (code "
+                                                            + response.getExitCode()
+                                                            + ")"));
                             return;
                         }
 
                         long size = saved.length();
                         SavedFileResult savedResult;
-                        if (treeUri != null) {
-                            try {
-                                savedResult = SafFileHelper.exportToTree(context, treeUri, saved);
-                            } catch (Exception ex) {
-                                emitter.emitFailed(
-                                        jobId,
-                                        ex.getMessage() != null
-                                                ? ex.getMessage()
-                                                : "Could not save to selected folder");
-                                return;
-                            }
-                        } else {
-                            File fallback =
-                                    YtDlpDownloadPathResolver.defaultNeonGrabDir(context);
-                            File dest = new File(fallback, saved.getName());
-                            copyFile(saved, dest);
-                            size = dest.length();
-                            try {
-                                savedResult = SafFileHelper.fromLocalFile(context, dest);
-                            } catch (Exception ex) {
-                                emitter.emitFailed(
-                                        jobId,
-                                        ex.getMessage() != null
-                                                ? ex.getMessage()
-                                                : "Could not prepare file for opening");
-                                return;
-                            }
+                        try {
+                            savedResult =
+                                    persistDownloadedFile(context, treeUri, saved, title);
+                        } catch (Exception ex) {
+                            emitter.emitFailed(
+                                    jobId,
+                                    ex.getMessage() != null
+                                            ? ex.getMessage()
+                                            : "Could not save downloaded file");
+                            return;
                         }
+                        size = savedResult.sizeBytes > 0 ? savedResult.sizeBytes : saved.length();
 
                         deleteRecursive(tempDir);
+                        emitter.emitProgress(jobId, 100, size, size, 0);
                         emitter.emitComplete(
                                 jobId,
                                 savedResult.displayPath,
@@ -209,6 +216,22 @@ public class YtDlpExecutor {
         JSObject ok = new JSObject();
         ok.put("ok", true);
         call.resolve(ok);
+    }
+
+    private static long parseSpeedBps(String line) {
+        if (line == null || line.isEmpty()) return 0;
+        Matcher m = SPEED_RE.matcher(line);
+        if (!m.find()) return 0;
+        try {
+            double value = Double.parseDouble(m.group(1));
+            String unit = m.group(2).toUpperCase(Locale.US);
+            if (unit.startsWith("G")) return Math.round(value * 1024 * 1024 * 1024);
+            if (unit.startsWith("M")) return Math.round(value * 1024 * 1024);
+            if (unit.startsWith("K")) return Math.round(value * 1024);
+            return Math.round(value);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     private void parseProgressFromLog(StringBuilder log, String jobId, long totalEstimate) {
@@ -311,6 +334,20 @@ public class YtDlpExecutor {
         return "m4a".equals(ext) || "mp3".equals(ext) || "opus".equals(ext) || "aac".equals(ext);
     }
 
+    private static String extractFailureReason(StringBuilder log) {
+        if (log == null || log.length() == 0) return null;
+        String text = log.toString();
+        for (String line : text.split("\n")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("ERROR:")) {
+                String msg = trimmed.substring(6).trim();
+                if (msg.length() > 160) msg = msg.substring(0, 160) + "…";
+                return msg;
+            }
+        }
+        return null;
+    }
+
     private static String tailLog(StringBuilder log, String fallback) {
         if (log.length() == 0) return fallback;
         String text = log.toString().trim();
@@ -318,29 +355,79 @@ public class YtDlpExecutor {
         return fallback + ": " + text;
     }
 
+    private static SavedFileResult persistDownloadedFile(
+            Context context, Uri treeUri, File saved, String title) throws Exception {
+        if (treeUri != null) {
+            try {
+                return SafFileHelper.exportToTree(context, treeUri, saved, title);
+            } catch (Exception safErr) {
+                File fallback = YtDlpDownloadPathResolver.defaultNeonGrabDir(context);
+                File dest = uniqueDestFile(fallback, saved.getName());
+                copyFile(saved, dest);
+                SavedFileResult local = SafFileHelper.fromLocalFile(context, dest);
+                return new SavedFileResult(
+                        "NeonGrab/"
+                                + dest.getName()
+                                + " (folder copy failed: "
+                                + safErr.getMessage()
+                                + ")",
+                        local.openUri,
+                        local.mimeType,
+                        dest.length());
+            }
+        }
+        File fallback = YtDlpDownloadPathResolver.defaultNeonGrabDir(context);
+        File dest = uniqueDestFile(fallback, saved.getName());
+        copyFile(saved, dest);
+        return SafFileHelper.fromLocalFile(context, dest);
+    }
+
+    private static File uniqueDestFile(File dir, String name) {
+        File dest = new File(dir, name);
+        if (!dest.exists()) return dest;
+        String base = name;
+        String ext = "";
+        int dot = name.lastIndexOf('.');
+        if (dot > 0) {
+            base = name.substring(0, dot);
+            ext = name.substring(dot);
+        }
+        for (int i = 1; i < 100; i++) {
+            File candidate = new File(dir, base + "_" + i + ext);
+            if (!candidate.exists()) return candidate;
+        }
+        return new File(dir, base + "_" + System.currentTimeMillis() + ext);
+    }
+
     private static File findLatestMedia(File dir) {
         File[] files = dir.listFiles();
         if (files == null) return null;
         File best = null;
-        long bestTime = 0;
+        long bestSize = 0;
         for (File f : files) {
             if (f.isDirectory()) {
                 File nested = findLatestMedia(f);
-                if (nested != null && nested.lastModified() >= bestTime) {
-                    bestTime = nested.lastModified();
+                if (nested != null && nested.length() >= bestSize) {
+                    bestSize = nested.length();
                     best = nested;
                 }
                 continue;
             }
-            if (!f.isFile() || f.length() == 0) continue;
+            if (!f.isFile() || f.length() < 32 * 1024) continue;
             String name = f.getName().toLowerCase(Locale.US);
-            if (name.endsWith(".part") || name.endsWith(".ytdl") || name.endsWith(".temp")) {
+            if (name.endsWith(".part")
+                    || name.endsWith(".ytdl")
+                    || name.endsWith(".temp")
+                    || name.endsWith(".json")
+                    || name.endsWith(".txt")
+                    || name.endsWith(".jpg")
+                    || name.endsWith(".png")) {
                 continue;
             }
             String ext = extensionOf(name);
-            if (!MEDIA_EXT.contains(ext)) continue;
-            if (f.lastModified() >= bestTime) {
-                bestTime = f.lastModified();
+            if (!ext.isEmpty() && !MEDIA_EXT.contains(ext)) continue;
+            if (f.length() >= bestSize) {
+                bestSize = f.length();
                 best = f;
             }
         }

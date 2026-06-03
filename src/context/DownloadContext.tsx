@@ -17,6 +17,7 @@ import { getDownloadFolder } from "@/services/downloadLocation";
 import { ensureYtDlpBinary } from "@/services/nativeYtDlp";
 import { resolveMediaUrl } from "@/services/urlResolver";
 import { extractUrlsFromText } from "@/services/urlInput";
+import { useEngineSetup } from "./EngineSetupContext";
 import { useSettings } from "./SettingsContext";
 
 type DownloadContextValue = {
@@ -39,6 +40,7 @@ type DownloadContextValue = {
 const DownloadContext = createContext<DownloadContextValue | null>(null);
 
 export function DownloadProvider({ children }: { children: ReactNode }) {
+  const { ready: engineReady } = useEngineSetup();
   const {
     maxConcurrent,
     maxThreads,
@@ -89,6 +91,10 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
 
   const enqueueUrl = useCallback(
     async (raw: string, batchMode: boolean) => {
+      if (Capacitor.getPlatform() === "android" && !engineReady) {
+        return { ok: false, count: 0, started: 0, error: "engineNotReady" };
+      }
+
       const urls = extractUrlsFromText(raw);
       if (urls.length === 0) {
         return { ok: false, count: 0, started: 0, error: "invalidUrl" };
@@ -134,7 +140,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
 
       return { ok: true, count: items.length, started };
     },
-    [wifiOnly, refresh],
+    [wifiOnly, engineReady, refresh],
   );
 
   const activeJobs = useMemo(
@@ -163,9 +169,10 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   );
 
   const activeThreadCount = useMemo(() => {
-    const downloading = activeJobs.filter((j) => j.status === "downloading").length;
+    const downloading = activeJobs.filter((j) => j.status === "downloading");
+    if (downloading.length === 0) return 0;
     const cap = thermalGuard ? Math.max(1, Math.floor(maxThreads / 2)) : maxThreads;
-    return Math.min(cap, downloading * 2 || 0);
+    return cap;
   }, [activeJobs, maxThreads, thermalGuard]);
 
   const value = useMemo<DownloadContextValue>(

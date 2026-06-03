@@ -2,54 +2,61 @@ package com.neongrab.downloader.ytdlp;
 
 import android.content.Context;
 import android.os.Build;
+import com.yausername.ffmpeg.FFmpeg;
 import com.yausername.youtubedl_android.YoutubeDL;
+import com.yausername.youtubedl_android.YoutubeDLException;
+import com.yausername.youtubedl_android.YoutubeDLUpdater;
+import java.io.File;
 import com.yausername.youtubedl_android.YoutubeDLRequest;
 import com.yausername.youtubedl_android.YoutubeDLResponse;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import kotlin.Unit;
 
 /** Wraps youtubedl-android (bundled Python + yt-dlp + ffmpeg) for real Android execution. */
 public final class YtDlpEngineHelper {
 
+    private static final int UPDATE_TIMEOUT_SEC = 90;
     private static final Object LOCK = new Object();
     private static volatile boolean initialized;
+    private static volatile boolean initSucceeded;
     private static volatile boolean updateAttempted;
+    private static volatile boolean setupInProgress;
     private static volatile String lastError;
+    private static volatile YtDlpSetupProgress progressListener;
 
     private YtDlpEngineHelper() {}
 
-    public static void initAsync(Context context) {
-        Context app = context.getApplicationContext();
-        new Thread(
-                        () -> {
-                            try {
-                                ensureReady(app, 180);
-                            } catch (Exception e) {
-                                lastError = e.getMessage();
-                            }
-                        },
-                        "ytdlp-init")
-                .start();
+    public static void setProgressListener(YtDlpSetupProgress listener) {
+        progressListener = listener;
+    }
+
+    public static boolean isSetupInProgress() {
+        return setupInProgress;
     }
 
     public static boolean isReady(Context context) {
-        if (!initialized) return false;
-        try {
-            String v = YoutubeDL.getInstance().version(context.getApplicationContext());
-            return v != null && !v.isEmpty();
-        } catch (Exception e) {
-            return false;
-        }
+        if (!initialized || !initSucceeded) return false;
+        Context app = context.getApplicationContext();
+        return hasVersion(app) || bundledEnginePresent(app);
     }
 
     public static String getVersion(Context context) {
+        Context app = context.getApplicationContext();
         try {
-            return YoutubeDL.getInstance().version(context.getApplicationContext());
-        } catch (Exception e) {
-            return null;
+            String v = YoutubeDL.getInstance().version(app);
+            if (v != null && !v.trim().isEmpty()) return v.trim();
+            v = YoutubeDL.getInstance().versionName(app);
+            if (v != null && !v.trim().isEmpty()) return v.trim();
+        } catch (Exception ignored) {
+            /* ignore */
         }
+        return initSucceeded ? "bundled" : null;
     }
 
     public static String getLastError() {
@@ -57,44 +64,222 @@ public final class YtDlpEngineHelper {
     }
 
     public static boolean ensureReady(Context context, int timeoutSeconds) throws Exception {
-        Context app = context.getApplicationContext();
-        synchronized (LOCK) {
-            if (!initialized) {
-                YoutubeDL.getInstance().init(app);
-                initialized = true;
+        return runSetup(context.getApplicationContext(), false);
+    }
+
+    public static boolean retrySetup(Context context, int timeoutSeconds) throws Exception {
+        return runSetup(context.getApplicationContext(), true);
+    }
+
+    private static boolean runSetup(Context app, boolean forceRetry) throws Exception {
+        if (setupInProgress) {
+            if (!waitForOtherSetup(forceRetry)) {
+                throw new Exception(
+                        lastError != null
+                                ? lastError
+                                : "Engine setup timed out. Tap Retry.");
             }
-            if (!updateAttempted) {
-                updateAttempted = true;
-                updateYoutubeDl(app);
+            if (isReady(app)) {
+                report(100, "Download engine ready");
+                return true;
+            }
+            if (!forceRetry) {
+                throw new Exception(
+                        lastError != null ? lastError : "Engine setup did not finish");
             }
         }
-        if (!isReady(app)) {
-            throw new Exception(
-                    lastError != null ? lastError : "Download engine is not ready yet");
+
+        setupInProgress = true;
+        try {
+            report(3, "Preparing download engine…");
+            synchronized (LOCK) {
+                if (forceRetry) {
+                    initialized = false;
+                    initSucceeded = false;
+                    updateAttempted = false;
+                    lastError = null;
+                }
+
+                if (!initialized) {
+                    report(10, "Unpacking bundled runtime…");
+                    initBundledLibraries(app);
+                    report(45, "Runtime unpacked");
+                }
+
+                report(55, "Verifying engine…");
+                if (!initialized || !initSucceeded) {
+                    throw new Exception(
+                            lastError != null
+                                    ? lastError
+                                    : "Engine initialization failed");
+                }
+                if (!verifyEngineReady(app)) {
+                    throw new Exception(
+                            lastError != null
+                                    ? lastError
+                                    : "Engine verification failed");
+                }
+                report(75, "Engine verified");
+
+                if (!updateAttempted) {
+                    updateAttempted = true;
+                    report(78, "Checking for updates (optional)…");
+                    tryUpdateWithTimeout(app);
+                }
+            }
+
+            report(95, "Finalizing…");
+            if (!isReady(app)) {
+                throw new Exception(
+                        lastError != null ? lastError : "Download engine is not ready");
+            }
+            report(100, "Download engine ready");
+            lastError = null;
+            return true;
+        } finally {
+            setupInProgress = false;
         }
+    }
+
+    private static boolean waitForOtherSetup(boolean forceRetry) throws InterruptedException {
+        int waited = 0;
+        int maxWait = forceRetry ? 5_000 : 120_000;
+        while (setupInProgress && waited < maxWait) {
+            Thread.sleep(250);
+            waited += 250;
+        }
+        return !setupInProgress;
+    }
+
+    private static void initBundledLibraries(Context app) throws Exception {
+        try {
+            YoutubeDL.getInstance().init(app);
+            FFmpeg.getInstance().init(app);
+            FfmpegBinaryHelper.prepare(app);
+            initialized = true;
+            initSucceeded = true;
+            lastError = null;
+        } catch (YoutubeDLException e) {
+            initialized = false;
+            initSucceeded = false;
+            lastError = formatError(e);
+            throw new Exception(lastError, e);
+        } catch (Exception e) {
+            initialized = false;
+            initSucceeded = false;
+            lastError = formatError(e);
+            throw e;
+        }
+    }
+
+    private static boolean hasVersion(Context app) {
+        try {
+            String v = YoutubeDL.getInstance().version(app);
+            if (v != null && !v.trim().isEmpty()) return true;
+            v = YoutubeDL.getInstance().versionName(app);
+            if (v != null && !v.trim().isEmpty()) return true;
+            v = YoutubeDLUpdater.INSTANCE.version(app);
+            return v != null && !v.trim().isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean bundledEnginePresent(Context app) {
+        try {
+            File base = new File(app.getFilesDir(), YoutubeDL.ytdlpDirName);
+            File bin = new File(base, YoutubeDL.ytdlpBin);
+            if (bin.isFile() && bin.length() > 512) return true;
+            File py = new File(base, "libpython.zip.so");
+            return py.isFile() && py.length() > 1024;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Init success is primary; version API often returns empty until first run. */
+    private static boolean verifyEngineReady(Context app) {
+        if (!initialized || !initSucceeded) return false;
+        if (bundledEnginePresent(app)) return true;
+        if (hasVersion(app)) return true;
         return true;
     }
 
-    private static void updateYoutubeDl(Context app) throws Exception {
+    private static void tryUpdateWithTimeout(Context app) {
+        AtomicBoolean done = new AtomicBoolean(false);
+        Thread ticker =
+                new Thread(
+                        () -> {
+                            int p = 78;
+                            while (!done.get() && p < 92) {
+                                report(p, "Updating engine (optional)…");
+                                try {
+                                    Thread.sleep(500);
+                                } catch (InterruptedException ignored) {
+                                    break;
+                                }
+                                p += 2;
+                            }
+                        },
+                        "ytdlp-update-ticker");
+
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        ticker.start();
         try {
-            YoutubeDL.UpdateStatus status =
-                    YoutubeDL.getInstance()
-                            .updateYoutubeDL(
-                                    app, YoutubeDL.UpdateChannel.STABLE.INSTANCE);
-            if (status == YoutubeDL.UpdateStatus.DONE
-                    || status == YoutubeDL.UpdateStatus.ALREADY_UP_TO_DATE) {
-                return;
-            }
-            lastError = "Engine update status: " + status;
+            Future<?> future =
+                    pool.submit(
+                            () -> {
+                                try {
+                                    YoutubeDL.UpdateStatus status =
+                                            YoutubeDL.getInstance()
+                                                    .updateYoutubeDL(
+                                                            app,
+                                                            YoutubeDL.UpdateChannel.STABLE
+                                                                    .INSTANCE);
+                                    if (status == YoutubeDL.UpdateStatus.DONE
+                                            || status
+                                                    == YoutubeDL.UpdateStatus
+                                                            .ALREADY_UP_TO_DATE) {
+                                        lastError = null;
+                                    }
+                                } catch (Exception e) {
+                                    lastError = e.getMessage();
+                                }
+                            });
+            future.get(UPDATE_TIMEOUT_SEC, TimeUnit.SECONDS);
         } catch (Exception e) {
-            lastError = e.getMessage();
-            if (!isReady(app)) throw e;
+            lastError =
+                    e instanceof java.util.concurrent.TimeoutException
+                            ? "Update skipped (slow network); using bundled engine"
+                            : e.getMessage();
+        } finally {
+            done.set(true);
+            ticker.interrupt();
+            pool.shutdownNow();
+        }
+    }
+
+    private static String formatError(Throwable e) {
+        if (e == null) return "Failed to initialize download engine";
+        String msg = e.getMessage();
+        if (msg == null || msg.isEmpty()) msg = e.getClass().getSimpleName();
+        if (msg.toLowerCase().contains("failed to initialize")) {
+            return msg
+                    + ". Reinstall the app or tap Retry. Use a real phone or ARM64 emulator.";
+        }
+        return msg;
+    }
+
+    private static void report(int percent, String message) {
+        if (progressListener != null) {
+            progressListener.onProgress(
+                    Math.max(0, Math.min(100, percent)), message);
         }
     }
 
     public static String runJsonProbe(Context context, String url, boolean flatPlaylist)
             throws Exception {
-        ensureReady(context, 120);
+        ensureReady(context, 300);
         YoutubeDLRequest request = new YoutubeDLRequest(url);
         request.addOption("-J");
         request.addOption("--no-warnings");
@@ -125,7 +310,10 @@ public final class YtDlpEngineHelper {
             List<String> extraArgs,
             YtDlpProgressHandler progressHandler)
             throws Exception {
-        ensureReady(context, 120);
+        ensureReady(context, 300);
+        Context app = context.getApplicationContext();
+        FfmpegBinaryHelper.ensurePatched(app);
+
         if (extraArgs == null || extraArgs.size() < 2) {
             throw new IllegalArgumentException("Missing download URL");
         }
@@ -147,7 +335,7 @@ public final class YtDlpEngineHelper {
                         false,
                         (progress, etaInSeconds, line) -> {
                             if (progressHandler != null) {
-                                progressHandler.onProgress(progress, etaInSeconds);
+                                progressHandler.onProgress(progress, etaInSeconds, line);
                             }
                             return Unit.INSTANCE;
                         });
@@ -189,7 +377,10 @@ public final class YtDlpEngineHelper {
         args.add("--concurrent-fragments");
         args.add(String.valueOf(Math.max(1, Math.min(maxThreads, 4))));
         args.add("--no-playlist");
-        args.add("--embed-metadata");
+        args.add("--no-embed-metadata");
+        args.add("--no-embed-thumbnail");
+        args.add("--no-abort-on-error");
+        args.add("--ignore-no-formats-error");
         return args;
     }
 
@@ -201,6 +392,6 @@ public final class YtDlpEngineHelper {
     }
 
     public interface YtDlpProgressHandler {
-        void onProgress(float progress, long etaInSeconds);
+        void onProgress(float progress, long etaInSeconds, String line);
     }
 }

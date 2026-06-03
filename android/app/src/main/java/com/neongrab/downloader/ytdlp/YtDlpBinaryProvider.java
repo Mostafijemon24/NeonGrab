@@ -30,7 +30,20 @@ public final class YtDlpBinaryProvider {
 
     public static InstallResult ensureInstalled(Context context) {
         try {
-            YtDlpEngineHelper.ensureReady(context, 180);
+            YtDlpEngineHelper.ensureReady(context, 300);
+            String version = getVersion(context);
+            return InstallResult.ok(version != null ? version : "ready");
+        } catch (Exception e) {
+            String msg = e.getMessage();
+            if (msg == null || msg.isEmpty()) msg = YtDlpEngineHelper.getLastError();
+            if (msg == null || msg.isEmpty()) msg = "Download engine setup failed";
+            return InstallResult.fail(msg);
+        }
+    }
+
+    public static InstallResult retryInstall(Context context) {
+        try {
+            YtDlpEngineHelper.retrySetup(context, 300);
             String version = getVersion(context);
             return InstallResult.ok(version != null ? version : "ready");
         } catch (Exception e) {

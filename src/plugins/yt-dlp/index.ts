@@ -7,6 +7,8 @@ export const YtDlp = registerPlugin<YtDlpPlugin>("YtDlp", {
 
 export type {
   DownloadFolderInfo,
+  EngineSetupFailedEvent,
+  EngineSetupProgressEvent,
   YtDlpAvailability,
   YtDlpCompleteEvent,
   YtDlpDownloadOptions,

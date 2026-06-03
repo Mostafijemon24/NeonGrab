@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Capacitor } from "@capacitor/core";
 import { ChevronRight, DownloadCloud, FolderOpen } from "lucide-react";
 import { getYtDlpAvailability, type YtDlpAvailability } from "@/services/nativeYtDlp";
+import { useEngineSetup } from "@/context/EngineSetupContext";
 import {
   formatFolderLabel,
   getDownloadFolder,
@@ -64,6 +65,8 @@ export function SettingsScreen() {
   const [folder, setFolder] = useState<DownloadFolderInfo | null>(null);
   const [picking, setPicking] = useState(false);
   const [pickError, setPickError] = useState<string | null>(null);
+  const { status: engineStatus, progress: engineProgress, ready: engineReady, retry } =
+    useEngineSetup();
   const isAndroid = Capacitor.getPlatform() === "android";
 
   const refreshFolder = useCallback(async () => {
@@ -77,7 +80,7 @@ export function SettingsScreen() {
   useEffect(() => {
     if (isAndroid) void getYtDlpAvailability().then(setYtdlp);
     void refreshFolder();
-  }, [isAndroid, refreshFolder]);
+  }, [isAndroid, refreshFolder, engineReady, engineStatus]);
 
   const handlePickFolder = async () => {
     if (!isAndroid) return;
@@ -258,13 +261,32 @@ export function SettingsScreen() {
             {tr("appVersion", { version: APP_VERSION })}
           </p>
           <p className="text-[#9f9fa9] text-xs leading-5">{tr("aboutText")}</p>
-          {ytdlp && (
-            <p className="text-[11px] text-[#9f9fa9] border-t border-white/10 pt-2 mt-2">
-              yt-dlp:{" "}
-              {ytdlp.available
-                ? `ready ${ytdlp.version ?? ""}`.trim()
-                : ytdlp.message ?? "not installed"}
-            </p>
+          {isAndroid && (
+            <div className="border-t border-white/10 pt-3 mt-2 gap-2 flex flex-col">
+              {engineStatus === "installing" && (
+                <div className="rounded-full bg-zinc-800 h-1.5 overflow-hidden">
+                  <div
+                    className="h-full bg-[#7f22fe] transition-[width] duration-300"
+                    style={{ width: `${engineProgress}%` }}
+                  />
+                </div>
+              )}
+              <p className="text-[11px] text-[#9f9fa9]">
+                {engineReady
+                  ? `${tr("engineReady")} ${ytdlp?.version ?? ""}`.trim()
+                  : engineStatus === "installing"
+                    ? `${tr("engineSettingUp")} ${engineProgress}%`
+                    : ytdlp?.message ?? tr("engineNotReady")}
+              </p>
+              {engineStatus === "failed" && (
+                <Button
+                  onClick={() => void retry()}
+                  className="h-10 rounded-xl bg-[#7f22fe] text-violet-50 font-semibold text-sm"
+                >
+                  {tr("setupEngine")}
+                </Button>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>

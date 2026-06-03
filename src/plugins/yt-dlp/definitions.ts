@@ -2,6 +2,7 @@ export type YtDlpQuality = "auto" | "1080" | "720" | "480" | "audio";
 
 export type YtDlpAvailability = {
   available: boolean;
+  initializing?: boolean;
   version?: string;
   binaryPath?: string;
   message?: string;
@@ -60,10 +61,21 @@ export type YtDlpFailedEvent = {
   message: string;
 };
 
+export type EngineSetupProgressEvent = {
+  progress: number;
+  message: string;
+};
+
+export type EngineSetupFailedEvent = {
+  message: string;
+};
+
 export interface YtDlpPlugin {
   isAvailable(): Promise<YtDlpAvailability>;
   installBinaryFromAssets(): Promise<{ ok: boolean; message?: string }>;
-  ensureEngine(): Promise<{ ok: boolean; message?: string; version?: string }>;
+  ensureEngine(options?: {
+    retry?: boolean;
+  }): Promise<{ ok: boolean; message?: string; version?: string }>;
   getDownloadFolder(): Promise<DownloadFolderInfo>;
   pickDownloadFolder(): Promise<DownloadFolderInfo>;
   probe(options: { url: string; flatPlaylist?: boolean }): Promise<YtDlpProbeResult>;
@@ -87,5 +99,17 @@ export interface YtDlpPlugin {
   addListener(
     eventName: "downloadFailed",
     listener: (e: YtDlpFailedEvent) => void,
+  ): Promise<{ remove: () => void }>;
+  addListener(
+    eventName: "engineSetupProgress",
+    listener: (e: EngineSetupProgressEvent) => void,
+  ): Promise<{ remove: () => void }>;
+  addListener(
+    eventName: "engineSetupComplete",
+    listener: () => void,
+  ): Promise<{ remove: () => void }>;
+  addListener(
+    eventName: "engineSetupFailed",
+    listener: (e: EngineSetupFailedEvent) => void,
   ): Promise<{ remove: () => void }>;
 }
