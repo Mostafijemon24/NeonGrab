@@ -1,7 +1,6 @@
 package com.neongrab.downloader.ytdlp;
 
 import android.content.Context;
-import com.yausername.ffmpeg.FFmpeg;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -23,13 +22,15 @@ final class FfmpegBinaryHelper {
     static void prepare(Context context) throws Exception {
         if (prepared && ffmpegBinDir != null) return;
         Context app = context.getApplicationContext();
-        FFmpeg.getInstance().init(app);
+        File nativeLib = EngineNativeLoader.resolveBinDir(context);
+        if (nativeLib == null) {
+            throw new Exception("Engine native libraries not available");
+        }
 
-        File nativeLib = new File(app.getApplicationInfo().nativeLibraryDir);
         File srcFfmpeg = new File(nativeLib, "libffmpeg.so");
         File srcFfprobe = new File(nativeLib, "libffprobe.so");
         if (!srcFfmpeg.isFile() || srcFfmpeg.length() < 1024) {
-            throw new Exception("Bundled ffmpeg library missing from APK");
+            throw new Exception("ffmpeg library missing from engine pack");
         }
 
         File binDir = new File(app.getFilesDir(), BIN_DIR);
@@ -68,6 +69,11 @@ final class FfmpegBinaryHelper {
     static void ensurePatched(Context context) throws Exception {
         prepare(context);
         patchYoutubeDlFfmpegPath(ffmpegBinDir);
+    }
+
+    static void reset() {
+        prepared = false;
+        ffmpegBinDir = null;
     }
 
     private static String buildLdLibraryPath(Context app, File nativeLib) {

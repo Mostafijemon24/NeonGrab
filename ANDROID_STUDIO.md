@@ -66,12 +66,32 @@ $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 
 ## Build APK from terminal
 
+**Lean release (~4–8 MB APK + first-run engine download):**
+
 ```powershell
 cd "G:\IDM For Phone\android"
+.\gradlew.bat assembleRelease
+```
+
+Output: `android/app/build/outputs/apk/release/app-release-unsigned.apk`
+
+Native engine libs are **not** bundled; first launch downloads `neongrab-engine-arm64-v0.18.1.zip` from GitHub (~47 MB). Pack that zip for hosting:
+
+```powershell
+cd "G:\IDM For Phone"
+.\scripts\pack-engine-arm64.ps1
+# Upload releases/neongrab-engine-arm64-v0.18.1.zip to GitHub release engine-0.18.1
+```
+
+**Debug:**
+
+```powershell
 .\gradlew.bat assembleDebug
 ```
 
-APK path: `android/app/build/outputs/apk/debug/app-debug.apk`
+Output: `android/app/build/outputs/apk/debug/app-debug.apk`
+
+For x86 emulators, use an **ARM64 system image** in Android Studio.
 
 ## Troubleshooting
 

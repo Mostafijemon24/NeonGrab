@@ -2,9 +2,7 @@ package com.neongrab.downloader.ytdlp;
 
 import android.content.Context;
 import android.os.Build;
-import com.yausername.ffmpeg.FFmpeg;
 import com.yausername.youtubedl_android.YoutubeDL;
-import com.yausername.youtubedl_android.YoutubeDLException;
 import com.yausername.youtubedl_android.YoutubeDLUpdater;
 import java.io.File;
 import com.yausername.youtubedl_android.YoutubeDLRequest;
@@ -98,12 +96,23 @@ public final class YtDlpEngineHelper {
                     initSucceeded = false;
                     updateAttempted = false;
                     lastError = null;
+                    FfmpegBinaryHelper.reset();
+                    EngineNativeLoader.reset();
+                    EnginePackDownloader.markerFile(app).delete();
+                    EnginePackDownloader.deleteRecursive(
+                            EngineNativeLoader.getDownloadedBinDir(app));
+                }
+
+                if (!EngineNativeLoader.apkBundledNativesPresent(app)
+                        && !EnginePackDownloader.isInstalled(app)) {
+                    report(2, "Preparing download engine…");
+                    ensureEnginePack(app);
                 }
 
                 if (!initialized) {
-                    report(10, "Unpacking bundled runtime…");
+                    report(48, "Initializing engine…");
                     initBundledLibraries(app);
-                    report(45, "Runtime unpacked");
+                    report(65, "Runtime ready");
                 }
 
                 report(55, "Verifying engine…");
@@ -153,23 +162,24 @@ public final class YtDlpEngineHelper {
 
     private static void initBundledLibraries(Context app) throws Exception {
         try {
-            YoutubeDL.getInstance().init(app);
-            FFmpeg.getInstance().init(app);
+            EngineNativeLoader.initEngine(app);
             FfmpegBinaryHelper.prepare(app);
             initialized = true;
             initSucceeded = true;
             lastError = null;
-        } catch (YoutubeDLException e) {
-            initialized = false;
-            initSucceeded = false;
-            lastError = formatError(e);
-            throw new Exception(lastError, e);
         } catch (Exception e) {
             initialized = false;
             initSucceeded = false;
             lastError = formatError(e);
-            throw e;
+            throw new Exception(lastError, e);
         }
+    }
+
+    private static void ensureEnginePack(Context app) throws Exception {
+        EnginePackDownloader.ensureDownloaded(
+                app,
+                (percent, message) -> report(percent, message));
+        EngineNativeLoader.reset();
     }
 
     private static boolean hasVersion(Context app) {
