@@ -81,20 +81,19 @@ export async function setupDownloadEngine(retry = false): Promise<YtDlpAvailabil
   ensurePromise = null;
   try {
     const result = await YtDlp.ensureEngine({ retry });
-    cachedAvailability = await getYtDlpAvailability(true);
     if (result.ok) {
       cachedAvailability = {
-        ...cachedAvailability,
         available: true,
-        version: result.version ?? cachedAvailability.version,
+        version: result.version ?? "ready",
       };
-    } else if (result.message) {
-      cachedAvailability = {
-        ...cachedAvailability,
-        available: false,
-        message: result.message,
-      };
+      return cachedAvailability;
     }
+    cachedAvailability = await getYtDlpAvailability(true);
+    cachedAvailability = {
+      ...cachedAvailability,
+      available: false,
+      message: result.message ?? cachedAvailability.message ?? "Engine setup failed",
+    };
     return cachedAvailability;
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Engine setup failed";

@@ -79,6 +79,7 @@ export function EngineSetupProvider({ children }: { children: ReactNode }) {
       },
       onFailed: (e) => {
         setStatus("failed");
+        setProgress(0);
         setMessage(e.message);
       },
     });

@@ -37,9 +37,9 @@ public final class YtDlpEngineHelper {
     }
 
     public static boolean isReady(Context context) {
-        if (!initialized || !initSucceeded) return false;
-        Context app = context.getApplicationContext();
-        return hasVersion(app) || bundledEnginePresent(app);
+        // Init success is authoritative; version() is often empty until first yt-dlp run,
+        // and bundledEnginePresent() misses lean APK engines in code_cache.
+        return initialized && initSucceeded;
     }
 
     public static String getVersion(Context context) {
@@ -213,6 +213,10 @@ public final class YtDlpEngineHelper {
 
     private static boolean bundledEnginePresent(Context app) {
         try {
+            if (EnginePackDownloader.isInstalled(app)) return true;
+            if (EngineNativeLoader.apkBundledNativesPresent(app)) return true;
+            File binDir = EngineNativeLoader.resolveBinDir(app);
+            if (binDir != null && EngineNativeLoader.verifyBinDir(binDir)) return true;
             File base = new File(app.getFilesDir(), YoutubeDL.ytdlpDirName);
             File bin = new File(base, YoutubeDL.ytdlpBin);
             if (bin.isFile() && bin.length() > 512) return true;

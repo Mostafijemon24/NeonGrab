@@ -84,11 +84,12 @@ public class YtDlpPlugin extends Plugin {
         data.put("progress", progress);
         data.put("message", message);
         notifyListeners("engineSetupProgress", data);
-        if (progress >= 100) {
-            JSObject done = new JSObject();
-            done.put("ready", true);
-            notifyListeners("engineSetupComplete", done);
-        }
+    }
+
+    private void emitEngineSetupComplete() {
+        JSObject done = new JSObject();
+        done.put("ready", true);
+        notifyListeners("engineSetupComplete", done);
     }
 
     private void emitEngineSetupFailed(String message) {
@@ -101,8 +102,12 @@ public class YtDlpPlugin extends Plugin {
     public void isAvailable(PluginCall call) {
         Context ctx = getContext();
         boolean installed = YtDlpBinaryProvider.isInstalled(ctx);
+        boolean packOnDisk =
+                EngineNativeLoader.apkBundledNativesPresent(ctx)
+                        || EnginePackDownloader.isInstalled(ctx);
         JSObject ret = new JSObject();
         ret.put("available", installed);
+        ret.put("packInstalled", packOnDisk);
         ret.put("initializing", YtDlpEngineHelper.isSetupInProgress());
         if (installed) {
             ret.put("version", YtDlpBinaryProvider.getVersion(ctx));
@@ -110,9 +115,15 @@ public class YtDlpPlugin extends Plugin {
         } else {
             String err = YtDlpEngineHelper.getLastError();
             if (YtDlpEngineHelper.isSetupInProgress()) {
-                ret.put("message", "Installing download engine…");
+                ret.put(
+                        "message",
+                        packOnDisk
+                                ? "Loading download engine…"
+                                : "Installing download engine…");
             } else if (err != null && !err.isEmpty()) {
                 ret.put("message", err);
+            } else if (packOnDisk) {
+                ret.put("message", "Download engine needs a moment to load");
             } else {
                 ret.put("message", "Tap Setup engine below (needs Wi‑Fi or mobile data)");
             }
@@ -153,6 +164,7 @@ public class YtDlpPlugin extends Plugin {
                         ret.put("path", result.path);
                         ret.put("version", YtDlpBinaryProvider.getVersion(getContext()));
                         emitEngineSetupProgress(100, "Download engine ready");
+                        emitEngineSetupComplete();
                     }
                     call.resolve(ret);
                 });
