@@ -8,6 +8,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 
 /**
  * Prepares ffmpeg/ffprobe/quickjs wrappers for yt-dlp. Binaries live in {@code code_cache} and
@@ -175,7 +176,13 @@ final class FfmpegBinaryHelper {
     /** yt-dlp accepts a directory containing ffmpeg/ffprobe or the binary path. */
     private static void patchYoutubeDlFfmpegPath(File binDir) throws Exception {
         Class<?> ytdlpClass = Class.forName("com.yausername.youtubedl_android.YoutubeDL");
-        Object instance = ytdlpClass.getMethod("getInstance").invoke(null);
+        Object instance;
+        try {
+            instance = ytdlpClass.getMethod("getInstance").invoke(null);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            throw (cause instanceof Exception) ? (Exception) cause : new RuntimeException(cause);
+        }
         Field ffmpegPathField = null;
         for (Field field : ytdlpClass.getDeclaredFields()) {
             if (File.class.equals(field.getType())) {

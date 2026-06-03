@@ -215,7 +215,13 @@ public final class YtDlpEngineHelper {
 
     private static void initBundledLibraries(Context app) throws Exception {
         try {
-            EngineNativeLoader.initEngine(app);
+            if (EngineNativeLoader.apkBundledNativesPresent(app)) {
+                /* Native libs are in the APK — use the library's own well-tested init path. */
+                YoutubeDL.getInstance().init(app);
+            } else {
+                /* Lean APK: engine was downloaded; initialize via reflection. */
+                EngineNativeLoader.initEngine(app);
+            }
             FfmpegBinaryHelper.prepare(app);
             initialized = true;
             initSucceeded = true;

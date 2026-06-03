@@ -1,6 +1,7 @@
 package com.neongrab.downloader.ytdlp;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.io.File;
 import java.util.Map;
@@ -10,12 +11,24 @@ final class YtDlpReflection {
 
     static Object youtubeDlInstance() throws Exception {
         Class<?> cls = Class.forName("com.yausername.youtubedl_android.YoutubeDL");
-        return cls.getMethod("getInstance").invoke(null);
+        try {
+            return cls.getMethod("getInstance").invoke(null);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception) throw (Exception) cause;
+            throw new RuntimeException(cause != null ? cause.getMessage() : "getInstance failed", e);
+        }
     }
 
     static Object ffmpegInstance() throws Exception {
         Class<?> cls = Class.forName("com.yausername.ffmpeg.FFmpeg");
-        return cls.getMethod("getInstance").invoke(null);
+        try {
+            return cls.getMethod("getInstance").invoke(null);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception) throw (Exception) cause;
+            throw new RuntimeException(cause != null ? cause.getMessage() : "getInstance failed", e);
+        }
     }
 
     static void setField(Object target, String name, Object value) throws Exception {
@@ -38,7 +51,13 @@ final class YtDlpReflection {
             throws Exception {
         Method method = target.getClass().getDeclaredMethod(name, types);
         method.setAccessible(true);
-        method.invoke(target, args);
+        try {
+            method.invoke(target, args);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception) throw (Exception) cause;
+            throw new RuntimeException(cause != null ? cause.getMessage() : "Invocation of " + name + " failed", e);
+        }
     }
 
     static String getStringField(Object target, String name) throws Exception {
