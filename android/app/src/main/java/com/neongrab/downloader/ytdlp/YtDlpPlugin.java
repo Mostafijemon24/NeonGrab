@@ -82,9 +82,7 @@ public class YtDlpPlugin extends Plugin {
         ret.put("available", installed);
         if (installed) {
             ret.put("version", YtDlpBinaryProvider.getVersion(getContext()));
-            ret.put(
-                    "binaryPath",
-                    YtDlpBinaryProvider.getBinaryFile(getContext()).getAbsolutePath());
+            ret.put("binaryPath", "bundled");
         } else {
             ret.put("message", "Download engine will install on first download");
         }

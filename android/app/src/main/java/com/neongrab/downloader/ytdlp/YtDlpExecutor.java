@@ -4,11 +4,7 @@ import android.content.Context;
 import android.net.Uri;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PluginCall;
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.InputStreamReader;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -18,6 +14,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import com.yausername.youtubedl_android.YoutubeDLResponse;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.json.JSONArray;
@@ -66,30 +63,21 @@ public class YtDlpExecutor {
     }
 
     public boolean isBinaryReady() {
-        return YtDlpBinaryProvider.isInstalled(context);
+        return YtDlpEngineHelper.isReady(context);
     }
 
     public void probe(PluginCall call, String url, boolean flatPlaylist) {
-        if (!YtDlpBinaryProvider.isInstalled(context)) {
-            call.reject("YT_DLP_NOT_INSTALLED", "yt-dlp is not installed yet");
-            return;
-        }
         pool.execute(
                 () -> {
                     try {
-                        List<String> cmd = baseCommand();
-                        cmd.add("-J");
-                        if (flatPlaylist) {
-                            cmd.add("--flat-playlist");
-                        } else {
-                            cmd.add("--no-playlist");
-                        }
-                        cmd.add(url);
-                        String json = runAndCapture(cmd);
+                        String json = YtDlpEngineHelper.runJsonProbe(context, url, flatPlaylist);
                         JSObject result = parseProbeJson(json, url);
                         call.resolve(result);
                     } catch (Exception e) {
-                        call.reject("PROBE_FAILED", e.getMessage(), e);
+                        call.reject(
+                                "PROBE_FAILED",
+                                e.getMessage() != null ? e.getMessage() : "Probe failed",
+                                e);
                     }
                 });
     }
@@ -102,10 +90,6 @@ public class YtDlpExecutor {
             String quality,
             boolean audioOnly,
             int maxThreads) {
-        if (!YtDlpBinaryProvider.isInstalled(context)) {
-            call.reject("YT_DLP_NOT_INSTALLED", "yt-dlp is not installed");
-            return;
-        }
         if (jobs.containsKey(jobId)) {
             call.reject("JOB_EXISTS", "Download already running for " + jobId);
             return;
@@ -130,65 +114,44 @@ public class YtDlpExecutor {
                                 new File(tempDir, safeId + ".%(ext)s").getAbsolutePath();
                         Uri treeUri = DownloadFolderStore.getTreeUri(context);
 
-                        List<String> cmd = baseCommand();
-                        cmd.add("-f");
-                        cmd.add(YtDlpFormatSelector.formatForQuality(quality, audioOnly));
-                        cmd.add("--merge-output-format");
-                        cmd.add(YtDlpFormatSelector.mergeFormat());
-                        cmd.add("-o");
-                        cmd.add(outTemplate);
-                        cmd.add("--newline");
-                        cmd.add("--progress");
-                        cmd.add("--no-part");
-                        cmd.add("--retries");
-                        cmd.add("3");
-                        cmd.add("--socket-timeout");
-                        cmd.add("30");
-                        cmd.add("--concurrent-fragments");
-                        cmd.add(String.valueOf(Math.max(1, Math.min(maxThreads, 4))));
-                        cmd.add("--no-playlist");
-                        cmd.add("--no-warnings");
-                        cmd.add(url);
-
-                        ProcessBuilder pb = new ProcessBuilder(cmd);
-                        pb.redirectErrorStream(true);
-                        Process process = pb.start();
-                        job.process = process;
+                        List<String> args =
+                                YtDlpEngineHelper.buildDownloadArgs(
+                                        outTemplate,
+                                        YtDlpFormatSelector.formatForQuality(quality, audioOnly),
+                                        YtDlpFormatSelector.mergeFormat(),
+                                        maxThreads,
+                                        audioOnly);
+                        args.add(url);
 
                         long totalEstimate = 100 * 1024 * 1024;
-                        try (BufferedReader reader =
-                                new BufferedReader(
-                                        new InputStreamReader(process.getInputStream()))) {
-                            String line;
-                            while ((line = reader.readLine()) != null) {
-                                if (log.length() < 8000) log.append(line).append('\n');
-                                if (job.cancelled.get()) {
-                                    process.destroy();
-                                    return;
-                                }
-                                if (job.paused.get()) {
-                                    process.destroy();
-                                    return;
-                                }
-                                Matcher m = PROGRESS_RE.matcher(line);
-                                if (m.find()) {
-                                    int pct =
-                                            Math.min(
-                                                    99, Math.round(Float.parseFloat(m.group(1))));
-                                    long downloaded = (totalEstimate * pct) / 100;
-                                    emitter.emitProgress(
-                                            jobId, pct, downloaded, totalEstimate, 0);
-                                }
-                            }
-                        }
+                        YoutubeDLResponse response =
+                                YtDlpEngineHelper.runDownload(
+                                        context,
+                                        jobId,
+                                        args,
+                                        (progress, etaInSeconds) -> {
+                                            if (job.cancelled.get() || job.paused.get()) {
+                                                return;
+                                            }
+                                            int pct = Math.min(99, Math.round(progress));
+                                            long downloaded = (totalEstimate * pct) / 100;
+                                            emitter.emitProgress(
+                                                    jobId, pct, downloaded, totalEstimate, 0);
+                                        });
 
-                        int code = process.waitFor();
+                        log.append(response.getOut()).append('\n').append(response.getErr());
+
                         jobs.remove(jobId);
                         if (job.cancelled.get()) return;
-                        if (code != 0) {
-                            emitter.emitFailed(jobId, tailLog(log, "yt-dlp failed (code " + code + ")"));
+
+                        if (response.getExitCode() != 0) {
+                            emitter.emitFailed(
+                                    jobId,
+                                    tailLog(log, "yt-dlp failed (code " + response.getExitCode() + ")"));
                             return;
                         }
+
+                        parseProgressFromLog(log, jobId, totalEstimate);
 
                         File saved = findLatestMedia(tempDir);
                         if (saved == null || saved.length() == 0) {
@@ -248,11 +211,27 @@ public class YtDlpExecutor {
         call.resolve(ok);
     }
 
+    private void parseProgressFromLog(StringBuilder log, String jobId, long totalEstimate) {
+        Matcher m = PROGRESS_RE.matcher(log.toString());
+        int lastPct = 0;
+        while (m.find()) {
+            lastPct = Math.min(99, Math.round(Float.parseFloat(m.group(1))));
+        }
+        if (lastPct > 0) {
+            long downloaded = (totalEstimate * lastPct) / 100;
+            emitter.emitProgress(jobId, lastPct, downloaded, totalEstimate, 0);
+        }
+    }
+
     public void pause(String jobId) {
         YtDlpJob job = jobs.get(jobId);
         if (job == null) return;
         job.paused.set(true);
-        if (job.process != null) job.process.destroy();
+        try {
+            com.yausername.youtubedl_android.YoutubeDL.getInstance().destroyProcessById(jobId);
+        } catch (Exception ignored) {
+            /* ignore */
+        }
     }
 
     public void resume(String jobId) {
@@ -265,27 +244,12 @@ public class YtDlpExecutor {
         YtDlpJob job = jobs.get(jobId);
         if (job == null) return;
         job.cancelled.set(true);
-        if (job.process != null) job.process.destroy();
-        jobs.remove(jobId);
-    }
-
-    private List<String> baseCommand() {
-        List<String> cmd = new ArrayList<>();
-        cmd.add(YtDlpBinaryProvider.getBinaryFile(context).getAbsolutePath());
-        cmd.add("--no-check-certificates");
-        return cmd;
-    }
-
-    private String runAndCapture(List<String> cmd) throws Exception {
-        ProcessBuilder pb = new ProcessBuilder(cmd);
-        pb.redirectErrorStream(true);
-        Process p = pb.start();
-        String output = readAll(p.getInputStream());
-        int code = p.waitFor();
-        if (code != 0) {
-            throw new Exception("yt-dlp failed: " + output.trim());
+        try {
+            com.yausername.youtubedl_android.YoutubeDL.getInstance().destroyProcessById(jobId);
+        } catch (Exception ignored) {
+            /* ignore */
         }
-        return output;
+        jobs.remove(jobId);
     }
 
     private JSObject parseProbeJson(String json, String fallbackUrl) throws Exception {
@@ -298,17 +262,25 @@ public class YtDlpExecutor {
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject e = arr.optJSONObject(i);
                 if (e == null) continue;
+                if (isDeadEntry(e)) continue;
                 entries.put(entryFromJson(e, fallbackUrl, i));
             }
             result.put("batch", true);
         } else {
-            entries.put(entryFromJson(root, fallbackUrl, 0));
+            if (!isDeadEntry(root)) {
+                entries.put(entryFromJson(root, fallbackUrl, 0));
+            }
             result.put("batch", false);
         }
 
         result.put("ok", entries.length() > 0);
         result.put("entries", entries);
         return result;
+    }
+
+    private static boolean isDeadEntry(JSONObject e) {
+        String title = e.optString("title", "").toLowerCase(Locale.US);
+        return title.contains("[deleted") || title.contains("private video");
     }
 
     private JSObject entryFromJson(JSONObject e, String fallbackUrl, int index)
@@ -320,6 +292,11 @@ public class YtDlpExecutor {
                 e.optString(
                         "webpage_url",
                         e.optString("url", e.optString("original_url", fallbackUrl)));
+        if (webpage != null && webpage.startsWith("https://www.youtube.com/watch?v=")) {
+            /* direct watch url */
+        } else if (id != null && !id.startsWith("item_") && webpage != null && webpage.contains("list=")) {
+            webpage = "https://www.youtube.com/watch?v=" + id;
+        }
         item.put("id", "job_" + id);
         item.put("title", title);
         item.put("url", webpage);
@@ -339,16 +316,6 @@ public class YtDlpExecutor {
         String text = log.toString().trim();
         if (text.length() > 400) text = text.substring(text.length() - 400);
         return fallback + ": " + text;
-    }
-
-    private static String readAll(java.io.InputStream in) throws java.io.IOException {
-        java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
-        byte[] chunk = new byte[8192];
-        int n;
-        while ((n = in.read(chunk)) > 0) {
-            buf.write(chunk, 0, n);
-        }
-        return buf.toString("UTF-8");
     }
 
     private static File findLatestMedia(File dir) {
@@ -393,7 +360,7 @@ public class YtDlpExecutor {
         //noinspection ResultOfMethodCallIgnored
         dest.delete();
         if (source.renameTo(dest) && dest.exists()) return;
-        try (FileInputStream in = new FileInputStream(source);
+        try (java.io.FileInputStream in = new java.io.FileInputStream(source);
                 java.io.FileOutputStream out = new java.io.FileOutputStream(dest)) {
             byte[] buf = new byte[8192];
             int n;
@@ -416,4 +383,5 @@ public class YtDlpExecutor {
         //noinspection ResultOfMethodCallIgnored
         file.delete();
     }
+
 }

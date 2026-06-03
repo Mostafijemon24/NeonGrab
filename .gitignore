@@ -8,6 +8,6 @@ android/app/build
 android/build
 .capacitor
 
-# Keep release APKs in repo
-!releases/
-!releases/*.apk
+# APKs are attached to GitHub Releases (too large for git; engine ~200 MB)
+releases/*.apk
+!releases/.gitkeep

@@ -7,18 +7,18 @@ public final class YtDlpFormatSelector {
 
     public static String formatForQuality(String quality, boolean audioOnly) {
         if (audioOnly || "audio".equals(quality)) {
-            return "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio";
+            return "bestaudio[ext=m4a]/bestaudio/bestaudio";
         }
         switch (quality) {
             case "1080":
-                return "best[height<=1080][ext=mp4]/best[height<=1080]/bv*+ba/b";
+                return "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]";
             case "720":
-                return "best[height<=720][ext=mp4]/best[height<=720]/bv*+ba/b";
+                return "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]";
             case "480":
-                return "best[height<=480][ext=mp4]/best[height<=480]/bv*+ba/b";
+                return "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]";
             case "auto":
             default:
-                return "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best";
+                return "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best";
         }
     }
 

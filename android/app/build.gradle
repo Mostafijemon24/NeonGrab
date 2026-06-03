@@ -7,8 +7,8 @@ android {
         applicationId "com.neongrab.downloader"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 3
+        versionName "1.2.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -31,7 +31,11 @@ repositories {
 }
 
 dependencies {
+    def youtubedlAndroid = "0.18.1"
     implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "io.github.junkfood02.youtubedl-android:library:$youtubedlAndroid"
+    implementation "io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlAndroid"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.24"
     implementation "androidx.documentfile:documentfile:1.0.1"
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"

@@ -45,13 +45,15 @@ export const en = {
   quality480: "Up to 480p",
   qualityAudio: "Audio only",
   about: "About",
+  appVersion: "Version {version}",
   aboutText:
     "Lightweight segmented downloads tuned for your device. Paste any supported media link.",
   itemsFound: "{count} items ready",
   batchMode: "Batch mode",
   analyzing: "Analyzing link...",
   invalidUrl: "Invalid or unsupported URL",
-  probeFailed: "Could not read playlist or links. Check URL and try again.",
+  probeFailed:
+    "Could not read playlist or links. Wait for the engine in Settings, then try again.",
   wifiOnlyBlocked: "Wi‑Fi only is on. Connect to Wi‑Fi to download.",
   noDownloadStarted: "Nothing was queued. Check the link and try again.",
   pasteBatch: "Paste playlist URL or one link per line",

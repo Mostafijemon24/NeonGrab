@@ -47,13 +47,15 @@ export const bn: Record<TranslationKey, string> = {
   quality480: "৪৮০p পর্যন্ত",
   qualityAudio: "শুধু অডিও",
   about: "সম্পর্কে",
+  appVersion: "ভার্সন {version}",
   aboutText:
     "আপনার ডিভাইসের জন্য টিউন করা হালকা সেগমেন্টেড ডাউনলোড। যেকোনো সমর্থিত মিডিয়া লিংক পেস্ট করুন।",
   itemsFound: "{count} আইটেম প্রস্তুত",
   batchMode: "ব্যাচ মোড",
   analyzing: "লিংক বিশ্লেষণ হচ্ছে...",
   invalidUrl: "অবৈধ বা অসমর্থিত URL",
-  probeFailed: "প্লেলিস্ট বা লিংক পড়া যায়নি। URL চেক করে আবার চেষ্টা করুন।",
+  probeFailed:
+    "প্লেলিস্ট বা লিংক পড়া যায়নি। সেটিংসে ইঞ্জিন প্রস্তুত হওয়ার পর আবার চেষ্টা করুন।",
   wifiOnlyBlocked: "শুধু Wi‑Fi চালু আছে। ডাউনলোডের জন্য Wi‑Fi এ সংযোগ দিন।",
   noDownloadStarted: "কিউতে কিছু যায়নি। লিংক চেক করে আবার চেষ্টা করুন।",
   pasteBatch: "প্লেলিস্ট URL অথবা প্রতি লাইনে একটি লিংক পেস্ট করুন",

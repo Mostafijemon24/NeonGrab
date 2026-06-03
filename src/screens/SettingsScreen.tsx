@@ -12,6 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useSettings, type VideoQuality } from "@/context/SettingsContext";
 import type { Locale } from "@/i18n";
+import { APP_VERSION } from "@/appVersion";
 import { cn } from "@/lib/utils";
 
 function Toggle({
@@ -253,6 +254,9 @@ export function SettingsScreen() {
       <Card className="backdrop-blur-xl rounded-2xl bg-zinc-900/50 border-white/10">
         <CardContent className="p-4 gap-2">
           <p className="text-sm font-medium text-neutral-50 mb-1">{tr("about")}</p>
+          <p className="text-[oklch(0.78_0.13_210)] text-xs font-medium mb-1">
+            {tr("appVersion", { version: APP_VERSION })}
+          </p>
           <p className="text-[#9f9fa9] text-xs leading-5">{tr("aboutText")}</p>
           {ytdlp && (
             <p className="text-[11px] text-[#9f9fa9] border-t border-white/10 pt-2 mt-2">
