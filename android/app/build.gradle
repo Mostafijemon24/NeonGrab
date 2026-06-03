@@ -1,0 +1,168 @@
+apply plugin: 'com.android.application'
+
+def leanEngineExcludes = [
+    "**/libpython.so",
+    "**/libpython.zip.so",
+    "**/libffmpeg.so",
+    "**/libffmpeg.zip.so",
+    "**/libffprobe.so",
+    "**/libqjs.so"
+]
+
+android {
+    namespace "com.neongrab.downloader"
+    compileSdk rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.neongrab.downloader"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 16
+        versionName "1.3.11"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    buildTypes {
+        debug {
+            ndk {
+                abiFilters "arm64-v8a", "x86_64"
+            }
+        }
+        // Lean ~4 MB APK; ARM64 engine downloaded on first launch on real phones.
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.debug
+            ndk {
+                abiFilters "arm64-v8a"
+            }
+            packaging {
+                jniLibs {
+                    useLegacyPackaging = true
+                    excludes += leanEngineExcludes
+                }
+            }
+        }
+    }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+    sourceSets {
+        debug {
+            assets.srcDir("$buildDir/generated/debugAssets")
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+configurations {
+    ytdlpJniAar
+}
+
+dependencies {
+    def youtubedlAndroid = "0.18.1"
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "io.github.junkfood02.youtubedl-android:library:$youtubedlAndroid"
+    implementation "io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlAndroid"
+    ytdlpJniAar "io.github.junkfood02.youtubedl-android:library:$youtubedlAndroid"
+    ytdlpJniAar "io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlAndroid"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.24"
+    implementation "androidx.documentfile:documentfile:1.0.1"
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+tasks.register("unpackYtdlpJniDebug") {
+    def jniOut = layout.buildDirectory.dir("ytdlp-jni")
+    outputs.dir(jniOut)
+    doLast {
+        def out = jniOut.get().asFile
+        if (out.exists()) {
+            out.deleteDir()
+        }
+        out.mkdirs()
+        configurations.ytdlpJniAar.resolve().each { aar ->
+                    copy {
+                        from zipTree(aar)
+                        include "jni/**"
+                        into out
+                        eachFile { fcd ->
+                            if (fcd.path.startsWith("jni/")) {
+                                fcd.path = fcd.path.substring(4)
+                            }
+                        }
+                        includeEmptyDirs = false
+                    }
+                }
+    }
+}
+
+tasks.register("prepareDebugEngineAsset") {
+    def armZip = file("$rootDir/../releases/neongrab-engine-arm64-v0.18.1.zip")
+    def x86Zip = file("$rootDir/../releases/neongrab-engine-x86_64-v0.18.1.zip")
+    def outDir = layout.buildDirectory.dir("generated/debugAssets")
+    outputs.dir(outDir)
+    doLast {
+        def dir = outDir.get().asFile
+        dir.mkdirs()
+        boolean any = false
+        if (armZip.isFile()) {
+            copy {
+                from armZip
+                into dir
+                rename { "engine-pack-arm64.zip" }
+            }
+            any = true
+        }
+        if (x86Zip.isFile()) {
+            copy {
+                from x86Zip
+                into dir
+                rename { "engine-pack-x86_64.zip" }
+            }
+            copy {
+                from x86Zip
+                into dir
+                rename { "engine-pack.zip" }
+            }
+            any = true
+        }
+        if (!any) {
+            logger.warn(
+                    "Debug engine assets missing — run scripts/pack-engine-arm64.ps1 and/or pack-engine-x86_64.ps1")
+        }
+    }
+}
+
+afterEvaluate {
+    tasks.named("preDebugBuild").configure { dependsOn("prepareDebugEngineAsset", "unpackYtdlpJniDebug") }
+    tasks.named("mergeDebugJniLibFolders").configure { dependsOn("unpackYtdlpJniDebug") }
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

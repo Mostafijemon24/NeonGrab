@@ -1,0 +1,15 @@
+node_modules
+dist
+.DS_Store
+*.local
+.idea
+android/.gradle
+android/app/build
+android/build
+.capacitor
+/lib/
+
+# APKs and engine packs are attached to GitHub Releases (too large for git)
+releases/*.apk
+releases/*.zip
+!releases/.gitkeep
