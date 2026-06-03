@@ -25,7 +25,9 @@ Open the Vite URL in a mobile viewport or browser dev tools.
 
 Pre-built debug APK (install on Android):
 
-**[Download NeonGrab-1.0.0.apk](releases/NeonGrab-1.0.0.apk)** (~4 MB)
+**[Download NeonGrab-1.0.0.apk](https://github.com/Mostafijemon24/NeonGrab/releases/download/v1.0.0/NeonGrab-1.0.0.apk)** (~4 MB)
+
+Repository: https://github.com/Mostafijemon24/NeonGrab
 
 Enable “Install unknown apps” for your browser or file manager, then open the APK.
 
