@@ -1,16 +1,21 @@
-import { Download, Film, Music, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Capacitor } from "@capacitor/core";
+import { ChevronRight, Download, Film, Music, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useEffect, useState } from "react";
 import { useDownloads } from "@/context/DownloadContext";
 import { useSettings } from "@/context/SettingsContext";
 import { formatFolderLabel, getDownloadFolder } from "@/services/downloadLocation";
+import type { DownloadJob } from "@/services/downloadEngine";
+import { openDownloadedFile } from "@/services/openMedia";
 import { formatBytes } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 export function VaultScreen() {
   const { tr } = useSettings();
   const { completedJobs, clearCompleted } = useDownloads();
   const [saveLabel, setSaveLabel] = useState("");
+  const [openError, setOpenError] = useState<string | null>(null);
 
   useEffect(() => {
     void getDownloadFolder().then((f) => {
@@ -18,6 +23,19 @@ export function VaultScreen() {
       setSaveLabel(label || tr("noFolderSelected"));
     });
   }, [tr]);
+
+  const handleOpen = async (job: DownloadJob) => {
+    if (Capacitor.getPlatform() !== "android") return;
+    setOpenError(null);
+    try {
+      await openDownloadedFile(job);
+    } catch {
+      setOpenError(tr("cannotOpenFile"));
+    }
+  };
+
+  const canOpen = (job: DownloadJob) =>
+    Capacitor.getPlatform() === "android" && !!(job.openUri || job.filePath);
 
   return (
     <div className="relative overflow-y-auto px-5 pt-8 pb-4 flex-1 min-h-0">
@@ -27,6 +45,9 @@ export function VaultScreen() {
           <p className="text-[#9f9fa9] text-xs mt-1 truncate" title={saveLabel}>
             {saveLabel}
           </p>
+          {Capacitor.getPlatform() === "android" && completedJobs.length > 0 && (
+            <p className="text-[#9f9fa9] text-[10px] mt-1">{tr("tapToOpen")}</p>
+          )}
         </div>
         {completedJobs.length > 0 && (
           <Button
@@ -40,6 +61,10 @@ export function VaultScreen() {
         )}
       </div>
 
+      {openError && (
+        <p className="text-red-400/90 text-xs mb-3 text-center">{openError}</p>
+      )}
+
       {completedJobs.length === 0 ? (
         <Card className="backdrop-blur-xl rounded-2xl bg-zinc-900/50 border-white/10 p-8">
           <CardContent className="p-0 flex flex-col items-center gap-3">
@@ -52,25 +77,44 @@ export function VaultScreen() {
           {completedJobs.map((job) => (
             <Card
               key={job.id}
-              className="backdrop-blur-xl rounded-2xl bg-zinc-900/50 border-white/10 p-4"
+              className={cn(
+                "backdrop-blur-xl rounded-2xl bg-zinc-900/50 border-white/10 p-4 transition-colors",
+                canOpen(job) && "active:bg-zinc-800/60 cursor-pointer",
+              )}
             >
-              <CardContent className="p-0 flex items-center gap-3">
-                <div className="size-10 shrink-0 rounded-xl bg-[#7f22fe]/15 border border-[#7f22fe]/30 flex justify-center items-center">
-                  {job.kind === "video" ? (
-                    <Film className="size-5 text-[#7f22fe]" />
-                  ) : (
-                    <Music className="size-5 text-[oklch(0.78_0.13_210)]" />
+              <button
+                type="button"
+                disabled={!canOpen(job)}
+                onClick={() => void handleOpen(job)}
+                className="w-full text-left disabled:cursor-default"
+              >
+                <CardContent className="p-0 flex items-center gap-3">
+                  <div className="size-10 shrink-0 rounded-xl bg-[#7f22fe]/15 border border-[#7f22fe]/30 flex justify-center items-center">
+                    {job.kind === "video" ? (
+                      <Film className="size-5 text-[#7f22fe]" />
+                    ) : (
+                      <Music className="size-5 text-[oklch(0.78_0.13_210)]" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium text-neutral-50 text-sm">
+                      {job.title}
+                    </p>
+                    <p
+                      className="text-[#9f9fa9] text-[11px] truncate"
+                      title={job.filePath}
+                    >
+                      {formatBytes(job.totalBytes)} ·{" "}
+                      {job.filePath
+                        ? tr("savedTo", { path: job.filePath })
+                        : tr("downloadComplete")}
+                    </p>
+                  </div>
+                  {canOpen(job) && (
+                    <ChevronRight className="size-4 text-[#7f22fe] shrink-0" />
                   )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-neutral-50 text-sm">
-                    {job.title}
-                  </p>
-                  <p className="text-[#9f9fa9] text-[11px]">
-                    {formatBytes(job.totalBytes)} · {tr("downloadComplete")}
-                  </p>
-                </div>
-              </CardContent>
+                </CardContent>
+              </button>
             </Card>
           ))}
         </div>

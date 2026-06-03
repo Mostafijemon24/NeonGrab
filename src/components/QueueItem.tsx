@@ -45,11 +45,13 @@ export function QueueItem({ job, onPause, onResume, onCancel }: Props) {
             className="font-semibold text-xs leading-4 shrink-0"
             style={{ color: accent }}
           >
-            {job.status === "queued"
-              ? "…"
-              : job.status === "paused"
-                ? tr("paused")
-                : `${job.progress}%`}
+            {job.status === "failed"
+              ? tr("downloadFailed")
+              : job.status === "queued"
+                ? "…"
+                : job.status === "paused"
+                  ? tr("paused")
+                  : `${job.progress}%`}
           </span>
           <div className="flex gap-1 shrink-0">
             {job.status === "downloading" && (

@@ -12,6 +12,9 @@ import {
   DownloadEngine,
   type DownloadJob,
 } from "@/services/downloadEngine";
+import { Capacitor } from "@capacitor/core";
+import { getDownloadFolder } from "@/services/downloadLocation";
+import { ensureYtDlpBinary } from "@/services/nativeYtDlp";
 import { resolveMediaUrl } from "@/services/urlResolver";
 import { useSettings } from "./SettingsContext";
 
@@ -22,7 +25,10 @@ type DownloadContextValue = {
   aggregateSpeedBps: number;
   activeThreadCount: number;
   thermalActive: boolean;
-  enqueueUrl: (url: string, batchMode: boolean) => Promise<{ ok: boolean; count: number }>;
+  enqueueUrl: (
+    url: string,
+    batchMode: boolean,
+  ) => Promise<{ ok: boolean; count: number; error?: string }>;
   pause: (id: string) => void;
   resume: (id: string) => void;
   cancel: (id: string) => void;
@@ -77,8 +83,20 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         }
       }
 
+      if (Capacitor.getPlatform() === "android") {
+        const folder = await getDownloadFolder();
+        if (!folder.configured) {
+          return { ok: false, count: 0, error: "folderRequired" };
+        }
+        const ready = await ensureYtDlpBinary();
+        if (!ready) {
+          return { ok: false, count: 0, error: "engineNotReady" };
+        }
+        await engineRef.current?.prepareNative();
+      }
+
       const result = await resolveMediaUrl(url, batchMode);
-      if (!result.ok) return { ok: false, count: 0 };
+      if (!result.ok) return { ok: false, count: 0, error: "invalidUrl" };
 
       const engine = engineRef.current;
       if (!engine) return { ok: false, count: 0 };

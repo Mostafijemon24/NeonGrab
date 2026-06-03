@@ -43,10 +43,17 @@ public class YtDlpPlugin extends Plugin {
 
                             @Override
                             public void emitComplete(
-                                    String jobId, String filePath, String title, long totalBytes) {
+                                    String jobId,
+                                    String filePath,
+                                    String openUri,
+                                    String mimeType,
+                                    String title,
+                                    long totalBytes) {
                                 JSObject data = new JSObject();
                                 data.put("jobId", jobId);
                                 data.put("filePath", filePath);
+                                data.put("openUri", openUri);
+                                data.put("mimeType", mimeType);
                                 data.put("title", title);
                                 data.put("totalBytes", totalBytes);
                                 notifyListeners("downloadComplete", data);
@@ -79,9 +86,7 @@ public class YtDlpPlugin extends Plugin {
                     "binaryPath",
                     YtDlpBinaryProvider.getBinaryFile(getContext()).getAbsolutePath());
         } else {
-            ret.put(
-                    "message",
-                    "Add ARM64 yt-dlp to android/app/src/main/assets/bin/yt-dlp and call installBinaryFromAssets()");
+            ret.put("message", "Download engine will install on first download");
         }
         call.resolve(ret);
     }
@@ -95,6 +100,38 @@ public class YtDlpPlugin extends Plugin {
         if (!result.ok) ret.put("message", result.message);
         else ret.put("path", result.path);
         call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void ensureEngine(PluginCall call) {
+        poolExecute(
+                call,
+                () -> {
+                    YtDlpBinaryProvider.InstallResult result =
+                            YtDlpBinaryProvider.ensureInstalled(getContext());
+                    JSObject ret = new JSObject();
+                    ret.put("ok", result.ok);
+                    if (!result.ok) ret.put("message", result.message);
+                    else {
+                        ret.put("path", result.path);
+                        ret.put("version", YtDlpBinaryProvider.getVersion(getContext()));
+                    }
+                    call.resolve(ret);
+                });
+    }
+
+    private final java.util.concurrent.ExecutorService setupPool =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    private void poolExecute(PluginCall call, Runnable task) {
+        setupPool.execute(
+                () -> {
+                    try {
+                        task.run();
+                    } catch (Exception e) {
+                        call.reject("ENGINE_SETUP_FAILED", e.getMessage(), e);
+                    }
+                });
     }
 
     @PluginMethod
@@ -199,5 +236,26 @@ public class YtDlpPlugin extends Plugin {
         String jobId = call.getString("jobId");
         if (jobId != null) executor.cancel(jobId);
         call.resolve();
+    }
+
+    @PluginMethod
+    public void openMediaFile(PluginCall call) {
+        String openUri = call.getString("openUri");
+        String filePath = call.getString("filePath");
+        String mimeType = call.getString("mimeType", "");
+
+        String target = openUri != null && !openUri.isEmpty() ? openUri : filePath;
+        if (target == null || target.isEmpty()) {
+            call.reject("NO_FILE", "No file to open");
+            return;
+        }
+
+        try {
+            android.content.Context ctx = getActivity() != null ? getActivity() : getContext();
+            MediaLauncher.open(ctx, target, mimeType);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("OPEN_FAILED", e.getMessage(), e);
+        }
     }
 }

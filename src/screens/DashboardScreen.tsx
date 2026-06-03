@@ -58,10 +58,14 @@ export function DashboardScreen() {
     setLoading(true);
     setError(null);
     setBatchHint(null);
-    const { ok, count } = await enqueueUrl(url.trim(), mode === "batch");
+    const { ok, count, error: errKey } = await enqueueUrl(url.trim(), mode === "batch");
     setLoading(false);
     if (!ok) {
-      setError(tr("invalidUrl"));
+      const key =
+        errKey === "engineNotReady" || errKey === "folderRequired" || errKey === "invalidUrl"
+          ? errKey
+          : "invalidUrl";
+      setError(tr(key));
       return;
     }
     if (count > 1) setBatchHint(tr("itemsFound", { count }));

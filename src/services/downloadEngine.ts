@@ -29,6 +29,8 @@ export type DownloadJob = {
   createdAt: number;
   completedAt?: number;
   filePath?: string;
+  openUri?: string;
+  mimeType?: string;
   native?: boolean;
 };
 
@@ -69,6 +71,11 @@ export class DownloadEngine {
     void this.initNative();
   }
 
+  async prepareNative(): Promise<boolean> {
+    await this.initNative();
+    return this.nativeReady;
+  }
+
   private async initNative(): Promise<void> {
     if (Capacitor.getPlatform() !== "android") return;
     await ensureYtDlpBinary();
@@ -99,6 +106,8 @@ export class DownloadEngine {
         job.downloadedBytes = e.totalBytes;
         job.totalBytes = e.totalBytes;
         job.filePath = e.filePath;
+        job.openUri = e.openUri;
+        job.mimeType = e.mimeType;
         job.title = e.title || job.title;
         job.completedAt = Date.now();
         job.speedBps = 0;
@@ -222,7 +231,7 @@ export class DownloadEngine {
     const queued = this.getAllJobs().filter((j) => j.status === "queued");
     for (const job of queued) {
       if (this.running >= limit) break;
-      if (job.native) {
+      if (Capacitor.getPlatform() === "android") {
         void this.startNative(job);
       } else {
         this.startSimulated(job);
@@ -241,13 +250,21 @@ export class DownloadEngine {
     };
   }
 
+  private failJob(job: DownloadJob, _message: string): void {
+    job.status = "failed";
+    job.native = false;
+    job.speedBps = 0;
+    this.callbacks.onUpdate({ ...job });
+    this.pump();
+  }
+
   private async startNative(job: DownloadJob): Promise<void> {
     if (job.status !== "queued") return;
     if (!this.nativeReady) {
       await this.initNative();
       job.native = this.nativeReady;
       if (!this.nativeReady) {
-        this.startSimulated(job);
+        this.failJob(job, "Download engine not ready. Open Settings and wait for engine setup.");
         return;
       }
       this.attachNativeListeners();

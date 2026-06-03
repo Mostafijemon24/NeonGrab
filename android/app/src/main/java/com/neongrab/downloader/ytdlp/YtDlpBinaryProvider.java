@@ -6,15 +6,19 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 
 /**
- * Locates yt-dlp binary: app files dir first, then copies from assets/bin/yt-dlp if present.
+ * Locates yt-dlp binary: internal files dir, assets, or download from GitHub releases.
  */
 public final class YtDlpBinaryProvider {
 
     private static final String ASSET_PATH = "bin/yt-dlp";
     private static final String BIN_DIR = "bin";
     private static final String BIN_NAME = "yt-dlp";
+    private static final String DOWNLOAD_URL =
+            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
 
     private YtDlpBinaryProvider() {}
 
@@ -24,7 +28,7 @@ public final class YtDlpBinaryProvider {
 
     public static boolean isInstalled(Context context) {
         File bin = getBinaryFile(context);
-        return bin.exists() && bin.canExecute() && bin.length() > 0;
+        return bin.exists() && bin.length() > 1024 * 1024 && bin.canExecute();
     }
 
     public static String getVersion(Context context) {
@@ -57,28 +61,69 @@ public final class YtDlpBinaryProvider {
     public static InstallResult installFromAssets(Context context) {
         AssetManager assets = context.getAssets();
         try (InputStream in = assets.open(ASSET_PATH)) {
-            File dir = new File(context.getFilesDir(), BIN_DIR);
-            if (!dir.exists() && !dir.mkdirs()) {
-                return InstallResult.fail("Could not create bin directory");
-            }
-            File outFile = getBinaryFile(context);
-            try (OutputStream out = new FileOutputStream(outFile)) {
-                byte[] buf = new byte[8192];
-                int n;
-                while ((n = in.read(buf)) > 0) {
-                    out.write(buf, 0, n);
-                }
-            }
-            //noinspection ResultOfMethodCallIgnored
-            outFile.setExecutable(true, false);
-            if (!outFile.canExecute()) {
-                return InstallResult.fail("Binary is not executable after install");
-            }
-            return InstallResult.ok(outFile.getAbsolutePath());
+            return writeBinary(in, getBinaryFile(context));
         } catch (Exception e) {
-            return InstallResult.fail(
-                    "Place a ARM64 yt-dlp binary at assets/bin/yt-dlp — " + e.getMessage());
+            return InstallResult.fail("Asset binary missing: " + e.getMessage());
         }
+    }
+
+    /** Download latest yt-dlp executable (Linux ARM64 works on Android). */
+    public static InstallResult installFromNetwork(Context context) {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL(DOWNLOAD_URL);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(30_000);
+            conn.setReadTimeout(120_000);
+            conn.setInstanceFollowRedirects(true);
+            conn.connect();
+            if (conn.getResponseCode() >= 400) {
+                return InstallResult.fail("Download failed: HTTP " + conn.getResponseCode());
+            }
+            try (InputStream in = conn.getInputStream()) {
+                return writeBinary(in, getBinaryFile(context));
+            }
+        } catch (Exception e) {
+            return InstallResult.fail("Could not download yt-dlp: " + e.getMessage());
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    public static InstallResult ensureInstalled(Context context) {
+        if (isInstalled(context)) {
+            return InstallResult.ok(getBinaryFile(context).getAbsolutePath());
+        }
+        InstallResult assets = installFromAssets(context);
+        if (assets.ok && isInstalled(context)) return assets;
+        InstallResult network = installFromNetwork(context);
+        if (network.ok && isInstalled(context)) return network;
+        return InstallResult.fail(
+                network.message != null
+                        ? network.message
+                        : (assets.message != null ? assets.message : "yt-dlp not available"));
+    }
+
+    private static InstallResult writeBinary(InputStream in, File outFile) throws Exception {
+        File dir = outFile.getParentFile();
+        if (dir != null && !dir.exists() && !dir.mkdirs()) {
+            return InstallResult.fail("Could not create bin directory");
+        }
+        try (OutputStream out = new FileOutputStream(outFile)) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
+        }
+        //noinspection ResultOfMethodCallIgnored
+        outFile.setExecutable(true, false);
+        if (!outFile.canExecute() || outFile.length() < 1024 * 1024) {
+            //noinspection ResultOfMethodCallIgnored
+            outFile.delete();
+            return InstallResult.fail("Downloaded binary is invalid or too small");
+        }
+        return InstallResult.ok(outFile.getAbsolutePath());
     }
 
     public static final class InstallResult {

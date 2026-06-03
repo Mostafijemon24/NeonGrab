@@ -49,6 +49,8 @@ export type YtDlpProgressEvent = {
 export type YtDlpCompleteEvent = {
   jobId: string;
   filePath: string;
+  openUri?: string;
+  mimeType?: string;
   title: string;
   totalBytes: number;
 };
@@ -61,6 +63,7 @@ export type YtDlpFailedEvent = {
 export interface YtDlpPlugin {
   isAvailable(): Promise<YtDlpAvailability>;
   installBinaryFromAssets(): Promise<{ ok: boolean; message?: string }>;
+  ensureEngine(): Promise<{ ok: boolean; message?: string; version?: string }>;
   getDownloadFolder(): Promise<DownloadFolderInfo>;
   pickDownloadFolder(): Promise<DownloadFolderInfo>;
   probe(options: { url: string; flatPlaylist?: boolean }): Promise<YtDlpProbeResult>;
@@ -68,6 +71,11 @@ export interface YtDlpPlugin {
   pause(options: { jobId: string }): Promise<void>;
   resume(options: { jobId: string }): Promise<void>;
   cancel(options: { jobId: string }): Promise<void>;
+  openMediaFile(options: {
+    openUri?: string;
+    filePath?: string;
+    mimeType?: string;
+  }): Promise<void>;
   addListener(
     eventName: "downloadProgress",
     listener: (e: YtDlpProgressEvent) => void,

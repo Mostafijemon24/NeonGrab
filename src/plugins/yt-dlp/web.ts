@@ -19,6 +19,10 @@ export class YtDlpWeb extends WebPlugin implements YtDlpPlugin {
     return { ok: false, message: "Not supported on web." };
   }
 
+  async ensureEngine(): Promise<{ ok: boolean; message?: string }> {
+    return { ok: false, message: "Android only" };
+  }
+
   async getDownloadFolder(): Promise<DownloadFolderInfo> {
     return {
       configured: false,
@@ -48,5 +52,9 @@ export class YtDlpWeb extends WebPlugin implements YtDlpPlugin {
 
   async cancel(): Promise<void> {
     /* no-op */
+  }
+
+  async openMediaFile(): Promise<void> {
+    throw this.unavailable("Open file is available on Android only.");
   }
 }

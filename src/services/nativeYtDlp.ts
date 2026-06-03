@@ -5,6 +5,7 @@ export type { YtDlpAvailability };
 import type { MediaKind, ResolvedItem } from "./urlResolver";
 
 let cachedAvailability: YtDlpAvailability | null = null;
+let ensurePromise: Promise<boolean> | null = null;
 
 export async function getYtDlpAvailability(
   forceRefresh = false,
@@ -24,19 +25,42 @@ export async function getYtDlpAvailability(
 }
 
 export async function ensureYtDlpBinary(): Promise<boolean> {
-  const status = await getYtDlpAvailability();
-  if (status.available) return true;
   if (Capacitor.getPlatform() !== "android") return false;
-  try {
-    const result = await YtDlp.installBinaryFromAssets();
-    if (result.ok) {
-      cachedAvailability = await YtDlp.isAvailable();
-      return cachedAvailability.available;
+  if (ensurePromise) return ensurePromise;
+
+  ensurePromise = (async () => {
+    const status = await getYtDlpAvailability(true);
+    if (status.available) return true;
+
+    try {
+      const engine = await YtDlp.ensureEngine();
+      if (engine.ok) {
+        cachedAvailability = await YtDlp.isAvailable();
+        return cachedAvailability.available;
+      }
+    } catch {
+      /* ignore */
     }
-  } catch {
-    /* ignore */
+
+    try {
+      const assets = await YtDlp.installBinaryFromAssets();
+      if (assets.ok) {
+        cachedAvailability = await YtDlp.isAvailable();
+        return cachedAvailability.available;
+      }
+    } catch {
+      /* ignore */
+    }
+
+    cachedAvailability = await getYtDlpAvailability(true);
+    return cachedAvailability.available;
+  })();
+
+  try {
+    return await ensurePromise;
+  } finally {
+    ensurePromise = null;
   }
-  return false;
 }
 
 export function qualityToNative(quality: string): YtDlpQuality {
