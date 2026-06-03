@@ -15,7 +15,7 @@ export type EngineSetupFailedEvent = {
 import type { MediaKind, ResolvedItem } from "./urlResolver";
 
 let cachedAvailability: YtDlpAvailability | null = null;
-let ensurePromise: Promise<boolean> | null = null;
+let setupInFlight: Promise<YtDlpAvailability> | null = null;
 
 export async function getYtDlpAvailability(
   forceRefresh = false,
@@ -77,47 +77,56 @@ export async function setupDownloadEngine(retry = false): Promise<YtDlpAvailabil
   if (Capacitor.getPlatform() !== "android") {
     return { available: false, message: "Not Android" };
   }
-  cachedAvailability = null;
-  ensurePromise = null;
-  try {
-    const result = await YtDlp.ensureEngine({ retry });
-    if (result.ok) {
+  if (setupInFlight && !retry) {
+    return setupInFlight;
+  }
+
+  const run = async (): Promise<YtDlpAvailability> => {
+    cachedAvailability = null;
+    try {
+      const result = await YtDlp.ensureEngine({ retry });
+      if (result.ok) {
+        cachedAvailability = {
+          available: true,
+          version: result.version ?? "ready",
+        };
+        return cachedAvailability;
+      }
+      const status = await getYtDlpAvailability(true);
       cachedAvailability = {
-        available: true,
-        version: result.version ?? "ready",
+        ...status,
+        available: false,
+        message: result.message ?? status.message ?? "Engine setup failed",
       };
       return cachedAvailability;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Engine setup failed";
+      cachedAvailability = { available: false, message: msg };
+      return cachedAvailability;
     }
-    cachedAvailability = await getYtDlpAvailability(true);
-    cachedAvailability = {
-      ...cachedAvailability,
-      available: false,
-      message: result.message ?? cachedAvailability.message ?? "Engine setup failed",
-    };
-    return cachedAvailability;
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Engine setup failed";
-    cachedAvailability = { available: false, message: msg };
-    return cachedAvailability;
+  };
+
+  setupInFlight = run();
+  try {
+    return await setupInFlight;
+  } finally {
+    setupInFlight = null;
   }
 }
 
 export async function ensureYtDlpBinary(): Promise<boolean> {
   if (Capacitor.getPlatform() !== "android") return false;
-  if (ensurePromise) return ensurePromise;
 
-  ensurePromise = (async () => {
-    const status = await getYtDlpAvailability(true);
-    if (status.available) return true;
-    const after = await setupDownloadEngine(false);
+  const status = await getYtDlpAvailability(true);
+  if (status.available) return true;
+
+  if (setupInFlight) {
+    const after = await setupInFlight;
     return after.available;
-  })();
-
-  try {
-    return await ensurePromise;
-  } finally {
-    ensurePromise = null;
   }
+
+  const after = await setupDownloadEngine(false);
+  return after.available;
 }
 
 export function qualityToNative(quality: string): YtDlpQuality {

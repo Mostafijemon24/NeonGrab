@@ -89,6 +89,11 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     };
   }, [refresh]);
 
+  useEffect(() => {
+    if (!engineReady) return;
+    void engineRef.current?.prepareNative();
+  }, [engineReady]);
+
   const enqueueUrl = useCallback(
     async (raw: string, batchMode: boolean) => {
       if (Capacitor.getPlatform() === "android" && !engineReady) {

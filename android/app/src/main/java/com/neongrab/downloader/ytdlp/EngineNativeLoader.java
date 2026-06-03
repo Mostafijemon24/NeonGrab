@@ -7,31 +7,100 @@ import com.yausername.youtubedl_android.YoutubeDL;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+
 /** Resolves native engine binaries from APK or first-run download; custom init for lean APK. */
 final class EngineNativeLoader {
+
+    private static final String PERSISTENT_DIR = "neongrab_engine";
 
     private static volatile File resolvedBinDir;
 
     private EngineNativeLoader() {}
 
-    static File getDownloadedBinDir(Context context) {
-        Context app = context.getApplicationContext();
-        File cacheBin = new File(app.getCodeCacheDir(), "engine/bin");
-        if (verifyBinDir(cacheBin)) return cacheBin;
-        File legacy = new File(app.getFilesDir(), "engine/bin");
-        if (verifyBinDir(legacy)) {
-            try {
-                migrateBinDir(legacy, cacheBin);
-            } catch (Exception ignored) {
-                return legacy;
-            }
-            return cacheBin;
-        }
-        return cacheBin;
+    static File persistentRoot(Context context) {
+        return new File(context.getApplicationContext().getFilesDir(), PERSISTENT_DIR);
+    }
+
+    static File persistentBinDir(Context context) {
+        return new File(persistentRoot(context), "bin");
+    }
+
+    static File execBinDir(Context context) {
+        return new File(context.getApplicationContext().getCodeCacheDir(), "engine/bin");
     }
 
     static File engineRoot(Context context) {
-        return new File(context.getApplicationContext().getCodeCacheDir(), "engine");
+        return persistentRoot(context);
+    }
+
+    static File getDownloadedBinDir(Context context) {
+        Context app = context.getApplicationContext();
+        try {
+            return ensureExecBinDir(app);
+        } catch (Exception e) {
+            File exec = execBinDir(app);
+            if (verifyBinDir(exec)) return exec;
+            File persistent = persistentBinDir(app);
+            if (verifyBinDir(persistent)) return persistent;
+            return exec;
+        }
+    }
+
+    /** Copy persistent engine libs into code_cache for linker64 execution. */
+    static File ensureExecBinDir(Context app) throws Exception {
+        File persistent = persistentBinDir(app);
+        File exec = execBinDir(app);
+
+        if (verifyBinDir(persistent)) {
+            if (!verifyBinDir(exec) || execNeedsRefresh(persistent, exec)) {
+                syncBinDir(persistent, exec);
+            }
+            makeExecutable(exec);
+            return exec;
+        }
+
+        File legacyCache = exec;
+        if (verifyBinDir(legacyCache)) {
+            syncBinDir(legacyCache, persistent);
+            makeExecutable(persistent);
+            return legacyCache;
+        }
+
+        File legacyFiles = new File(app.getFilesDir(), "engine/bin");
+        if (verifyBinDir(legacyFiles)) {
+            syncBinDir(legacyFiles, persistent);
+            syncBinDir(legacyFiles, exec);
+            makeExecutable(exec);
+            return exec;
+        }
+
+        if (!exec.exists()) exec.mkdirs();
+        return exec;
+    }
+
+    static void syncBinDir(File from, File to) throws Exception {
+        if (!from.isDirectory()) {
+            throw new Exception("Engine source folder missing");
+        }
+        if (!to.exists() && !to.mkdirs()) {
+            throw new Exception("Could not create engine exec folder");
+        }
+        for (String name : EnginePackConfig.REQUIRED_LIBS) {
+            File src = new File(from, name);
+            if (!src.isFile()) continue;
+            copyFile(src, new File(to, name));
+        }
+        makeExecutable(to);
+    }
+
+    private static boolean execNeedsRefresh(File src, File dst) {
+        for (String name : EnginePackConfig.REQUIRED_LIBS) {
+            File s = new File(src, name);
+            File d = new File(dst, name);
+            if (!s.isFile()) continue;
+            if (!d.isFile() || d.length() != s.length()) return true;
+        }
+        return false;
     }
 
     static boolean useLinker(Context context, File binDir) {
@@ -45,7 +114,6 @@ final class EngineNativeLoader {
         return "/system/bin/linker";
     }
 
-    /** True when an ELF must be started via {@code linker64} (not under APK nativeLibraryDir). */
     static boolean needsLinkerExec(File elf, Context context) {
         if (elf == null) return true;
         String path = elf.getAbsolutePath();
@@ -91,7 +159,6 @@ final class EngineNativeLoader {
         resolvedBinDir = null;
     }
 
-    /** Initialize youtubedl-android using APK or downloaded native libs. */
     static void initEngine(Context context) throws Exception {
         Context app = context.getApplicationContext();
         File binDir = resolveBinDir(app);
@@ -107,8 +174,6 @@ final class EngineNativeLoader {
         File ytdlpDir = new File(baseDir, YoutubeDL.ytdlpDirName);
 
         Object ytdlp = YtDlpReflection.youtubeDlInstance();
-        Class<?> ytdlpClass = ytdlp.getClass();
-
         YtDlpReflection.setField(ytdlp, "initialized", false);
         YtDlpReflection.setField(ytdlp, "binDir", binDir);
         YtDlpReflection.setField(ytdlp, "pythonPath", new File(binDir, "libpython.so"));
@@ -157,21 +222,7 @@ final class EngineNativeLoader {
         }
     }
 
-    private static void migrateBinDir(File from, File to) throws Exception {
-        if (!to.exists() && !to.mkdirs()) {
-            throw new Exception("Could not migrate engine to code cache");
-        }
-        File[] files = from.listFiles();
-        if (files != null) {
-            for (File f : files) {
-                if (!f.isFile()) continue;
-                copyFile(f, new File(to, f.getName()));
-            }
-        }
-        makeExecutable(to);
-    }
-
-    private static void copyFile(File src, File dst) throws Exception {
+    static void copyFile(File src, File dst) throws Exception {
         try (FileInputStream in = new FileInputStream(src);
                 FileOutputStream out = new FileOutputStream(dst)) {
             byte[] buf = new byte[8192];
@@ -185,7 +236,6 @@ final class EngineNativeLoader {
     private static void initFfmpegPackages(Context app, File binDir, File ffmpegDir)
             throws Exception {
         Object ffmpeg = YtDlpReflection.ffmpegInstance();
-        Class<?> cls = ffmpeg.getClass();
         YtDlpReflection.setField(ffmpeg, "initialized", false);
         YtDlpReflection.setField(ffmpeg, "binDir", binDir);
         YtDlpReflection.invoke(

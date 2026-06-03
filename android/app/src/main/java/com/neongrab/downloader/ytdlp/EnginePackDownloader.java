@@ -29,33 +29,48 @@ final class EnginePackDownloader {
         } catch (Exception e) {
             return false;
         }
-        File bin = EngineNativeLoader.getDownloadedBinDir(app);
-        return markerFile(app).isFile() && EngineAbi.validateEngineBinDir(bin);
+        File persistent = EngineNativeLoader.persistentBinDir(app);
+        return markerFile(app).isFile() && EngineAbi.validateEngineBinDir(persistent);
     }
 
     /** Drop cached engine when CPU/arch marker does not match this device. */
     static void reconcileEngineForDevice(Context app) {
         if (EngineNativeLoader.apkBundledNativesPresent(app)) return;
-        File bin = EngineNativeLoader.getDownloadedBinDir(app);
+        migrateLegacyInstall(app);
+        File persistent = EngineNativeLoader.persistentBinDir(app);
         boolean markerOk;
         try {
             markerOk = markerMatchesDevice(app);
         } catch (Exception e) {
             markerOk = false;
         }
-        boolean binsOk = EngineAbi.validateEngineBinDir(bin);
-        if (!markerOk || !binsOk) {
+        boolean persistentOk = EngineAbi.validateEngineBinDir(persistent);
+        if (markerOk && persistentOk) {
+            try {
+                EngineNativeLoader.ensureExecBinDir(app);
+            } catch (Exception ignored) {
+                /* re-sync on next init */
+            }
+            return;
+        }
+        if (!markerOk || !persistentOk) {
             clearEngineInstall(app);
         }
     }
 
     static void clearEngineInstall(Context app) {
-        deleteRecursive(EngineNativeLoader.getDownloadedBinDir(app));
-        deleteRecursive(EngineNativeLoader.engineRoot(app));
+        deleteRecursive(EngineNativeLoader.persistentBinDir(app));
+        deleteRecursive(EngineNativeLoader.persistentRoot(app));
+        deleteRecursive(EngineNativeLoader.execBinDir(app));
+        deleteRecursive(new File(app.getCodeCacheDir(), "engine"));
         deleteRecursive(new File(app.getFilesDir(), "engine"));
         deleteRecursive(new File(app.getCodeCacheDir(), "neongrab_bin"));
         File legacyMarker = new File(app.getFilesDir(), "engine/.pack_version");
         legacyMarker.delete();
+        app.getSharedPreferences("neongrab_engine", Context.MODE_PRIVATE)
+                .edit()
+                .clear()
+                .apply();
         EngineNativeLoader.reset();
         FfmpegBinaryHelper.reset();
     }
@@ -87,12 +102,45 @@ final class EnginePackDownloader {
 
     static File markerFile(Context context) {
         Context app = context.getApplicationContext();
-        File marker =
-                new File(EngineNativeLoader.engineRoot(app), ".pack_version");
+        File marker = new File(EngineNativeLoader.engineRoot(app), ".pack_version");
         if (marker.isFile()) return marker;
+        File legacyCache = new File(app.getCodeCacheDir(), "engine/.pack_version");
+        if (legacyCache.isFile()) return legacyCache;
         File legacy = new File(app.getFilesDir(), "engine/.pack_version");
         if (legacy.isFile()) return legacy;
         return marker;
+    }
+
+    private static void migrateLegacyInstall(Context app) {
+        File persistent = EngineNativeLoader.persistentBinDir(app);
+        if (EngineNativeLoader.verifyBinDir(persistent)) return;
+
+        File exec = EngineNativeLoader.execBinDir(app);
+        if (EngineNativeLoader.verifyBinDir(exec)) {
+            try {
+                if (!persistent.exists()) persistent.mkdirs();
+                EngineNativeLoader.syncBinDir(exec, persistent);
+                File legacyMarker = new File(app.getCodeCacheDir(), "engine/.pack_version");
+                if (legacyMarker.isFile()) {
+                    copyMarker(legacyMarker, markerFile(app));
+                }
+            } catch (Exception ignored) {
+                /* fall through */
+            }
+        }
+    }
+
+    private static void copyMarker(File from, File to) throws Exception {
+        File parent = to.getParentFile();
+        if (parent != null && !parent.exists()) parent.mkdirs();
+        try (FileInputStream in = new FileInputStream(from);
+                FileOutputStream out = new FileOutputStream(to)) {
+            byte[] buf = new byte[64];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
+        }
     }
 
     static void ensureDownloaded(Context context, Progress progress) throws Exception {
@@ -100,6 +148,7 @@ final class EnginePackDownloader {
         clearWrongAbiInstall(app);
         if (isInstalled(app)) {
             progress.onProgress(40, "Engine pack already installed");
+            EngineNativeLoader.ensureExecBinDir(app);
             return;
         }
         if (EngineNativeLoader.apkBundledNativesPresent(app)) {
@@ -109,12 +158,13 @@ final class EnginePackDownloader {
         EngineAbi.requireSupportedDevice(app);
 
         File engineRoot = EngineNativeLoader.engineRoot(app);
-        File binDir = EngineNativeLoader.getDownloadedBinDir(app);
+        File binDir = EngineNativeLoader.persistentBinDir(app);
         File tmpZip = new File(engineRoot, "pack.download");
         File staging = new File(engineRoot, "pack_staging");
 
         deleteRecursive(staging);
         deleteRecursive(binDir);
+        deleteRecursive(EngineNativeLoader.execBinDir(app));
         if (!engineRoot.exists() && !engineRoot.mkdirs()) {
             throw new Exception("Could not create engine directory");
         }
@@ -163,6 +213,7 @@ final class EnginePackDownloader {
 
         writeMarker(app);
         EngineNativeLoader.makeExecutable(binDir);
+        EngineNativeLoader.syncBinDir(binDir, EngineNativeLoader.execBinDir(app));
         progress.onProgress(42, "Engine pack installed");
     }
 

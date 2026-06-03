@@ -70,9 +70,7 @@ export class DownloadEngine {
   constructor(
     private callbacks: EngineCallbacks,
     private options: EngineOptions,
-  ) {
-    void this.initNative();
-  }
+  ) {}
 
   async prepareNative(): Promise<boolean> {
     await this.initNative();

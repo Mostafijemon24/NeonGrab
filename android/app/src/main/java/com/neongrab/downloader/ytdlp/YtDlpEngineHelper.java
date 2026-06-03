@@ -82,6 +82,7 @@ public final class YtDlpEngineHelper {
         initSucceeded = false;
         updateAttempted = false;
         lastError = null;
+        app.getSharedPreferences("neongrab_engine", Context.MODE_PRIVATE).edit().clear().apply();
         EnginePackDownloader.clearEngineInstall(app);
     }
 
@@ -144,12 +145,18 @@ public final class YtDlpEngineHelper {
                                     ? lastError
                                     : "Engine verification failed");
                 }
+                report(68, "Testing engine…");
+                smokeTestEngine(app);
                 report(75, "Engine verified");
 
                 if (!updateAttempted) {
                     updateAttempted = true;
-                    report(78, "Checking for updates (optional)…");
-                    tryUpdateWithTimeout(app);
+                    if (EngineNativeLoader.apkBundledNativesPresent(app)) {
+                        report(78, "Checking for updates (optional)…");
+                        tryUpdateWithTimeout(app);
+                    } else {
+                        report(85, "Engine ready");
+                    }
                 }
             }
 
@@ -158,8 +165,8 @@ public final class YtDlpEngineHelper {
                 throw new Exception(
                         lastError != null ? lastError : "Download engine is not ready");
             }
+            markSetupComplete(app);
             report(100, "Download engine ready");
-            lastError = null;
             return true;
         } finally {
             setupInProgress = false;
@@ -196,6 +203,32 @@ public final class YtDlpEngineHelper {
                 app,
                 (percent, message) -> report(percent, message));
         EngineNativeLoader.reset();
+        EngineNativeLoader.ensureExecBinDir(app);
+    }
+
+    private static void markSetupComplete(Context app) {
+        try {
+            app.getSharedPreferences("neongrab_engine", Context.MODE_PRIVATE)
+                    .edit()
+                    .putBoolean("ready", true)
+                    .putString("pack_ver", EnginePackConfig.packVersion(app))
+                    .apply();
+        } catch (Exception ignored) {
+            /* optional persistence */
+        }
+        lastError = null;
+    }
+
+    private static void smokeTestEngine(Context app) throws Exception {
+        YoutubeDLRequest request = new YoutubeDLRequest("https://www.youtube.com/watch?v=jNQXAC9IVRw");
+        request.addOption("--version");
+        YoutubeDLResponse response =
+                YtDlpProcessRunner.execute(
+                        app, request, "smoke_" + System.nanoTime(), true, null);
+        if (response.getExitCode() != 0) {
+            String detail = (response.getErr() + "\n" + response.getOut()).trim();
+            throw new Exception(detail.isEmpty() ? "Engine test failed" : detail);
+        }
     }
 
     private static boolean hasVersion(Context app) {
