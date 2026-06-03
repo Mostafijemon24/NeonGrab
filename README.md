@@ -25,7 +25,9 @@ Open the Vite URL in a mobile viewport or browser dev tools.
 
 **Lean install (~8 MB)** — download engine on first launch (~47 MB once, Wi‑Fi recommended):
 
-**[Download NeonGrab-1.3.1-arm64.apk](https://github.com/Mostafijemon24/NeonGrab/releases/download/v1.3.1/NeonGrab-1.3.1-arm64.apk)**
+**Latest release: v1.3.9** — source on `main` ([tag v1.3.9](https://github.com/Mostafijemon24/NeonGrab/releases/tag/v1.3.9))
+
+**[Download NeonGrab-1.3.1-arm64.apk](https://github.com/Mostafijemon24/NeonGrab/releases/download/v1.3.1/NeonGrab-1.3.1-arm64.apk)** (previous lean build)
 
 On first open, NeonGrab downloads the yt-dlp engine pack from GitHub (one time). After that, downloads work offline.
 
