@@ -7,8 +7,8 @@ android {
         applicationId "com.neongrab.downloader"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 5
-        versionName "1.3.0"
+        versionCode 6
+        versionName "1.3.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             // Real phones use arm64 only (~50 MB engine). Dropping x86 + armeabi-v7a
@@ -26,6 +26,8 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // Sideload / GitHub releases: sign with debug key (unsigned release APK won't install)
+            signingConfig signingConfigs.debug
         }
     }
     packaging {
