@@ -1,0 +1,13 @@
+node_modules
+dist
+.DS_Store
+*.local
+.idea
+android/.gradle
+android/app/build
+android/build
+.capacitor
+
+# Keep release APKs in repo
+!releases/
+!releases/*.apk
