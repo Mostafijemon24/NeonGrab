@@ -1,9 +1,12 @@
 package com.neongrab.downloader.ytdlp;
 
 import android.content.Context;
+import android.system.ErrnoException;
+import android.system.Os;
 import com.yausername.youtubedl_android.YoutubeDL;
 import java.io.File;
-
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 /** Resolves native engine binaries from APK or first-run download; custom init for lean APK. */
 final class EngineNativeLoader {
 
@@ -12,7 +15,43 @@ final class EngineNativeLoader {
     private EngineNativeLoader() {}
 
     static File getDownloadedBinDir(Context context) {
-        return new File(context.getApplicationContext().getFilesDir(), "engine/bin");
+        Context app = context.getApplicationContext();
+        File cacheBin = new File(app.getCodeCacheDir(), "engine/bin");
+        if (verifyBinDir(cacheBin)) return cacheBin;
+        File legacy = new File(app.getFilesDir(), "engine/bin");
+        if (verifyBinDir(legacy)) {
+            try {
+                migrateBinDir(legacy, cacheBin);
+            } catch (Exception ignored) {
+                return legacy;
+            }
+            return cacheBin;
+        }
+        return cacheBin;
+    }
+
+    static File engineRoot(Context context) {
+        return new File(context.getApplicationContext().getCodeCacheDir(), "engine");
+    }
+
+    static boolean useLinker(Context context, File binDir) {
+        if (apkBundledNativesPresent(context)) return false;
+        File nativeLib = new File(context.getApplicationInfo().nativeLibraryDir);
+        return !binDir.getAbsolutePath().equals(nativeLib.getAbsolutePath());
+    }
+
+    static String linkerPath() {
+        if (new File("/system/bin/linker64").exists()) return "/system/bin/linker64";
+        return "/system/bin/linker";
+    }
+
+    /** True when an ELF must be started via {@code linker64} (not under APK nativeLibraryDir). */
+    static boolean needsLinkerExec(File elf, Context context) {
+        if (elf == null) return true;
+        String path = elf.getAbsolutePath();
+        File nativeLib = new File(context.getApplicationInfo().nativeLibraryDir);
+        String prefix = nativeLib.getAbsolutePath() + File.separator;
+        return !path.startsWith(prefix);
     }
 
     static boolean apkBundledNativesPresent(Context context) {
@@ -98,7 +137,49 @@ final class EngineNativeLoader {
         YtDlpReflection.setField(ytdlp, "initialized", true);
 
         initFfmpegPackages(app, binDir, ffmpegDir);
+        makeExecutable(binDir);
         resolvedBinDir = binDir;
+    }
+
+    static void makeExecutable(File binDir) {
+        if (binDir == null || !binDir.isDirectory()) return;
+        File[] files = binDir.listFiles();
+        if (files == null) return;
+        for (File f : files) {
+            if (!f.isFile()) continue;
+            f.setReadable(true, false);
+            f.setExecutable(true, false);
+            try {
+                Os.chmod(f.getAbsolutePath(), 0755);
+            } catch (ErrnoException ignored) {
+                /* ignore */
+            }
+        }
+    }
+
+    private static void migrateBinDir(File from, File to) throws Exception {
+        if (!to.exists() && !to.mkdirs()) {
+            throw new Exception("Could not migrate engine to code cache");
+        }
+        File[] files = from.listFiles();
+        if (files != null) {
+            for (File f : files) {
+                if (!f.isFile()) continue;
+                copyFile(f, new File(to, f.getName()));
+            }
+        }
+        makeExecutable(to);
+    }
+
+    private static void copyFile(File src, File dst) throws Exception {
+        try (FileInputStream in = new FileInputStream(src);
+                FileOutputStream out = new FileOutputStream(dst)) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
+        }
     }
 
     private static void initFfmpegPackages(Context app, File binDir, File ffmpegDir)

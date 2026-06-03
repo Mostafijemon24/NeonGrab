@@ -1,7 +1,7 @@
 import { Film, Music, Pause, Play, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import type { DownloadJob } from "@/services/downloadEngine";
-import { formatBytes } from "@/lib/utils";
+import { displayJobTitle, formatBytes } from "@/lib/utils";
 import { useSettings } from "@/context/SettingsContext";
 
 type Props = {
@@ -17,9 +17,9 @@ export function QueueItem({ job, onPause, onResume, onCancel }: Props) {
   const accent = isVideo ? "#7f22fe" : "oklch(0.78 0.13 210)";
 
   return (
-    <Card className="backdrop-blur-xl rounded-2xl bg-zinc-900/50 border-white/10 p-4 gap-3">
-      <CardContent className="p-0 gap-3">
-        <div className="flex items-center gap-3">
+    <Card className="backdrop-blur-xl rounded-2xl bg-zinc-900/50 border-white/10 p-4 gap-3 overflow-hidden">
+      <CardContent className="p-0 gap-3 min-w-0 overflow-hidden">
+        <div className="flex items-center gap-3 min-w-0 overflow-hidden">
           <div
             className="size-10 shrink-0 rounded-xl border flex justify-center items-center"
             style={{
@@ -33,11 +33,14 @@ export function QueueItem({ job, onPause, onResume, onCancel }: Props) {
               <Music className="size-5" style={{ color: accent }} />
             )}
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-medium text-neutral-50 text-sm leading-5">
-              {job.title}
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <p
+              className="font-medium text-neutral-50 text-sm leading-5 break-words [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden"
+              title={displayJobTitle(job)}
+            >
+              {displayJobTitle(job)}
             </p>
-            <p className="text-[#9f9fa9] text-[11px]">
+            <p className="text-[#9f9fa9] text-[11px] truncate">
               {formatBytes(
                 job.status === "completed" ? job.downloadedBytes : job.totalBytes,
               )}{" "}

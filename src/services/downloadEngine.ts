@@ -1,9 +1,11 @@
 import { Capacitor } from "@capacitor/core";
 import { YtDlp } from "@/plugins/yt-dlp";
 import type { ResolvedItem } from "./urlResolver";
+import { looksLikeWeakTitle } from "@/lib/utils";
 import {
   ensureYtDlpBinary,
   getYtDlpAvailability,
+  probeUrlNative,
   qualityToNative,
   subscribeNativeDownloadEvents,
 } from "./nativeYtDlp";
@@ -303,6 +305,14 @@ export class DownloadEngine {
         return;
       }
       this.attachNativeListeners();
+    }
+
+    if (looksLikeWeakTitle(job.title)) {
+      const probed = await probeUrlNative(job.sourceUrl, false);
+      const realTitle = probed?.[0]?.title?.trim();
+      if (realTitle && !looksLikeWeakTitle(realTitle)) {
+        job.title = realTitle;
+      }
     }
 
     job.status = "downloading";

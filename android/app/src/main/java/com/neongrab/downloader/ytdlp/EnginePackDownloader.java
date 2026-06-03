@@ -21,19 +21,83 @@ final class EnginePackDownloader {
     private EnginePackDownloader() {}
 
     static boolean isInstalled(Context context) {
-        File bin = EngineNativeLoader.getDownloadedBinDir(context);
-        if (!markerFile(context).isFile()) return false;
-        return EngineNativeLoader.verifyBinDir(bin);
+        Context app = context.getApplicationContext();
+        if (EngineNativeLoader.apkBundledNativesPresent(app)) return true;
+        try {
+            if (!EngineAbi.isSupported(app)) return false;
+            if (!markerMatchesDevice(app)) return false;
+        } catch (Exception e) {
+            return false;
+        }
+        File bin = EngineNativeLoader.getDownloadedBinDir(app);
+        return markerFile(app).isFile() && EngineAbi.validateEngineBinDir(bin);
+    }
+
+    /** Drop cached engine when CPU/arch marker does not match this device. */
+    static void reconcileEngineForDevice(Context app) {
+        if (EngineNativeLoader.apkBundledNativesPresent(app)) return;
+        File bin = EngineNativeLoader.getDownloadedBinDir(app);
+        boolean markerOk;
+        try {
+            markerOk = markerMatchesDevice(app);
+        } catch (Exception e) {
+            markerOk = false;
+        }
+        boolean binsOk = EngineAbi.validateEngineBinDir(bin);
+        if (!markerOk || !binsOk) {
+            clearEngineInstall(app);
+        }
+    }
+
+    static void clearEngineInstall(Context app) {
+        deleteRecursive(EngineNativeLoader.getDownloadedBinDir(app));
+        deleteRecursive(EngineNativeLoader.engineRoot(app));
+        deleteRecursive(new File(app.getFilesDir(), "engine"));
+        deleteRecursive(new File(app.getCodeCacheDir(), "neongrab_bin"));
+        File legacyMarker = new File(app.getFilesDir(), "engine/.pack_version");
+        legacyMarker.delete();
+        EngineNativeLoader.reset();
+        FfmpegBinaryHelper.reset();
+    }
+
+    static void clearWrongAbiInstall(Context app) {
+        reconcileEngineForDevice(app);
+    }
+
+    private static boolean markerMatchesDevice(Context app) {
+        File marker = markerFile(app);
+        if (!marker.isFile()) return false;
+        try {
+            String expected = EnginePackConfig.packVersion(app);
+            String actual = readMarkerText(marker);
+            return expected.equals(actual);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static String readMarkerText(File marker) throws Exception {
+        try (FileInputStream in = new FileInputStream(marker)) {
+            byte[] buf = new byte[64];
+            int n = in.read(buf);
+            if (n <= 0) return "";
+            return new String(buf, 0, n).trim();
+        }
     }
 
     static File markerFile(Context context) {
-        return new File(
-                context.getApplicationContext().getFilesDir(),
-                "engine/.pack_version");
+        Context app = context.getApplicationContext();
+        File marker =
+                new File(EngineNativeLoader.engineRoot(app), ".pack_version");
+        if (marker.isFile()) return marker;
+        File legacy = new File(app.getFilesDir(), "engine/.pack_version");
+        if (legacy.isFile()) return legacy;
+        return marker;
     }
 
     static void ensureDownloaded(Context context, Progress progress) throws Exception {
         Context app = context.getApplicationContext();
+        clearWrongAbiInstall(app);
         if (isInstalled(app)) {
             progress.onProgress(40, "Engine pack already installed");
             return;
@@ -42,8 +106,9 @@ final class EnginePackDownloader {
             progress.onProgress(40, "Using bundled engine libraries");
             return;
         }
+        EngineAbi.requireSupportedDevice(app);
 
-        File engineRoot = new File(app.getFilesDir(), "engine");
+        File engineRoot = EngineNativeLoader.engineRoot(app);
         File binDir = EngineNativeLoader.getDownloadedBinDir(app);
         File tmpZip = new File(engineRoot, "pack.download");
         File staging = new File(engineRoot, "pack_staging");
@@ -58,12 +123,27 @@ final class EnginePackDownloader {
         }
 
         progress.onProgress(5, "Downloading engine (~47 MB)…");
-        downloadFile(EnginePackConfig.DOWNLOAD_URL, tmpZip, progress);
+        Exception downloadErr = null;
+        try {
+            downloadFile(EnginePackConfig.downloadUrl(app), tmpZip, progress);
+        } catch (Exception e) {
+            downloadErr = e;
+            progress.onProgress(8, "Online engine unavailable, trying bundled pack…");
+            if (!installFromAssets(app, tmpZip, progress)) {
+                throw downloadErr;
+            }
+        }
 
         if (tmpZip.length() < EnginePackConfig.MIN_PACK_BYTES) {
             deleteRecursive(tmpZip);
-            throw new Exception(
-                    "Engine download incomplete. Check internet and try again.");
+            if (installFromAssets(app, tmpZip, progress)) {
+                /* recovered from debug asset */
+            } else {
+                throw new Exception(
+                        downloadErr != null
+                                ? downloadErr.getMessage()
+                                : "Engine download incomplete. Check internet and try again.");
+            }
         }
 
         progress.onProgress(38, "Unpacking engine…");
@@ -82,7 +162,28 @@ final class EnginePackDownloader {
         }
 
         writeMarker(app);
+        EngineNativeLoader.makeExecutable(binDir);
         progress.onProgress(42, "Engine pack installed");
+    }
+
+    private static boolean installFromAssets(Context app, File dest, Progress progress)
+            throws Exception {
+        try (InputStream in = app.getAssets().open("engine-pack.zip");
+                FileOutputStream out = new FileOutputStream(dest)) {
+            byte[] buf = new byte[8192];
+            int n;
+            long done = 0;
+            while ((n = in.read(buf)) >= 0) {
+                out.write(buf, 0, n);
+                done += n;
+            }
+            out.flush();
+            progress.onProgress(20, "Bundled engine loaded (" + formatMb(done) + ")");
+            return dest.length() >= EnginePackConfig.MIN_PACK_BYTES;
+        } catch (Exception ignored) {
+            if (dest.exists()) dest.delete();
+            return false;
+        }
     }
 
     private static void downloadFile(String urlStr, File dest, Progress progress)
@@ -197,7 +298,7 @@ final class EnginePackDownloader {
         File parent = marker.getParentFile();
         if (parent != null && !parent.exists()) parent.mkdirs();
         try (FileOutputStream out = new FileOutputStream(marker)) {
-            out.write(EnginePackConfig.PACK_VERSION.getBytes());
+            out.write(EnginePackConfig.packVersion(app).getBytes());
         }
     }
 

@@ -14,8 +14,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import kotlin.Unit;
-
 /** Wraps youtubedl-android (bundled Python + yt-dlp + ffmpeg) for real Android execution. */
 public final class YtDlpEngineHelper {
 
@@ -62,11 +60,29 @@ public final class YtDlpEngineHelper {
     }
 
     public static boolean ensureReady(Context context, int timeoutSeconds) throws Exception {
-        return runSetup(context.getApplicationContext(), false);
+        Context app = context.getApplicationContext();
+        try {
+            return runSetup(app, false);
+        } catch (Exception e) {
+            if (EngineAbi.isAbiMismatchMessage(e.getMessage())) {
+                resetEngineState(app);
+                return runSetup(app, true);
+            }
+            throw e;
+        }
     }
 
     public static boolean retrySetup(Context context, int timeoutSeconds) throws Exception {
+        resetEngineState(context.getApplicationContext());
         return runSetup(context.getApplicationContext(), true);
+    }
+
+    static void resetEngineState(Context app) {
+        initialized = false;
+        initSucceeded = false;
+        updateAttempted = false;
+        lastError = null;
+        EnginePackDownloader.clearEngineInstall(app);
     }
 
     private static boolean runSetup(Context app, boolean forceRetry) throws Exception {
@@ -90,21 +106,21 @@ public final class YtDlpEngineHelper {
         setupInProgress = true;
         try {
             report(3, "Preparing download engine…");
+            EnginePackDownloader.reconcileEngineForDevice(app);
             synchronized (LOCK) {
                 if (forceRetry) {
                     initialized = false;
                     initSucceeded = false;
                     updateAttempted = false;
                     lastError = null;
-                    FfmpegBinaryHelper.reset();
-                    EngineNativeLoader.reset();
-                    EnginePackDownloader.markerFile(app).delete();
-                    EnginePackDownloader.deleteRecursive(
-                            EngineNativeLoader.getDownloadedBinDir(app));
+                    EnginePackDownloader.clearEngineInstall(app);
                 }
 
                 if (!EngineNativeLoader.apkBundledNativesPresent(app)
                         && !EnginePackDownloader.isInstalled(app)) {
+                    initialized = false;
+                    initSucceeded = false;
+                    EngineAbi.requireSupportedDevice(app);
                     report(2, "Preparing download engine…");
                     ensureEnginePack(app);
                 }
@@ -273,6 +289,8 @@ public final class YtDlpEngineHelper {
         if (e == null) return "Failed to initialize download engine";
         String msg = e.getMessage();
         if (msg == null || msg.isEmpty()) msg = e.getClass().getSimpleName();
+        String friendly = EngineAbi.friendlyError(msg);
+        if (friendly != null && !friendly.equals(msg)) return friendly;
         if (msg.toLowerCase().contains("failed to initialize")) {
             return msg
                     + ". Reinstall the app or tap Retry. Use a real phone or ARM64 emulator.";
@@ -290,6 +308,7 @@ public final class YtDlpEngineHelper {
     public static String runJsonProbe(Context context, String url, boolean flatPlaylist)
             throws Exception {
         ensureReady(context, 300);
+        FfmpegBinaryHelper.ensurePatched(context.getApplicationContext());
         YoutubeDLRequest request = new YoutubeDLRequest(url);
         request.addOption("-J");
         request.addOption("--no-warnings");
@@ -302,7 +321,12 @@ public final class YtDlpEngineHelper {
         }
 
         YoutubeDLResponse response =
-                YoutubeDL.getInstance().execute(request, "probe_" + Math.abs(url.hashCode()));
+                YtDlpProcessRunner.execute(
+                        context,
+                        request,
+                        "probe_" + Math.abs(url.hashCode()),
+                        false,
+                        null);
         if (response.getExitCode() != 0) {
             String out = response.getOut() + response.getErr();
             throw new Exception(trimOutput(out, "Probe failed"));
@@ -338,17 +362,12 @@ public final class YtDlpEngineHelper {
             request.addOption(extraArgs.get(i));
         }
 
-        return YoutubeDL.getInstance()
-                .execute(
-                        request,
-                        processId,
-                        false,
-                        (progress, etaInSeconds, line) -> {
-                            if (progressHandler != null) {
-                                progressHandler.onProgress(progress, etaInSeconds, line);
-                            }
-                            return Unit.INSTANCE;
-                        });
+        return YtDlpProcessRunner.execute(
+                context,
+                request,
+                processId,
+                false,
+                progressHandler);
     }
 
     private static void addYoutubeCompatArgs(YoutubeDLRequest request) {

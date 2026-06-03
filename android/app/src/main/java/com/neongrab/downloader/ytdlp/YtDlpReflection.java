@@ -2,7 +2,8 @@ package com.neongrab.downloader.ytdlp;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-
+import java.io.File;
+import java.util.Map;
 final class YtDlpReflection {
 
     private YtDlpReflection() {}
@@ -38,5 +39,37 @@ final class YtDlpReflection {
         Method method = target.getClass().getDeclaredMethod(name, types);
         method.setAccessible(true);
         method.invoke(target, args);
+    }
+
+    static String getStringField(Object target, String name) throws Exception {
+        Object v = getFieldObject(target, name);
+        return v != null ? v.toString() : null;
+    }
+
+    static File getFileField(Object target, String name) throws Exception {
+        Object v = getFieldObject(target, name);
+        return v instanceof File ? (File) v : null;
+    }
+
+    @SuppressWarnings("unchecked")
+    static Map<String, Process> getProcessMap(Object ytdlp) throws Exception {
+        Object map = getFieldObject(ytdlp, "idProcessMap");
+        return (Map<String, Process>) map;
+    }
+
+    private static Object getFieldObject(Object target, String name) throws Exception {
+        Class<?> cls = target.getClass();
+        Field field = null;
+        for (Field f : cls.getDeclaredFields()) {
+            if (f.getName().equals(name)) {
+                field = f;
+                break;
+            }
+        }
+        if (field == null) {
+            throw new NoSuchFieldException(name + " on " + cls.getName());
+        }
+        field.setAccessible(true);
+        return field.get(target);
     }
 }

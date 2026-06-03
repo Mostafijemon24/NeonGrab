@@ -104,6 +104,7 @@ public class YtDlpExecutor {
         pool.execute(
                 () -> {
                     StringBuilder log = new StringBuilder();
+                    String resolvedTitle = resolveTitleForDownload(url, title);
                     try {
                         File tempDir = new File(context.getCacheDir(), "ytdlp_jobs/" + jobId);
                         deleteRecursive(tempDir);
@@ -185,7 +186,7 @@ public class YtDlpExecutor {
                         SavedFileResult savedResult;
                         try {
                             savedResult =
-                                    persistDownloadedFile(context, treeUri, saved, title);
+                                    persistDownloadedFile(context, treeUri, saved, resolvedTitle);
                         } catch (Exception ex) {
                             emitter.emitFailed(
                                     jobId,
@@ -203,13 +204,26 @@ public class YtDlpExecutor {
                                 savedResult.displayPath,
                                 savedResult.openUri,
                                 savedResult.mimeType,
-                                title,
+                                finalDisplayTitle(resolvedTitle, savedResult.displayPath),
                                 size);
                     } catch (Exception e) {
                         jobs.remove(jobId);
-                        emitter.emitFailed(
-                                jobId,
-                                tailLog(log, e.getMessage() != null ? e.getMessage() : "Download failed"));
+                        String msg = e.getMessage() != null ? e.getMessage() : "Download failed";
+                        if (EngineAbi.isAbiMismatchMessage(msg)) {
+                            try {
+                                YtDlpEngineHelper.resetEngineState(context);
+                                YtDlpEngineHelper.ensureReady(context, 300);
+                                msg =
+                                        "Engine was wrong for this device and has been reinstalled. "
+                                                + "Please tap Start Download again.";
+                            } catch (Exception setupErr) {
+                                msg = EngineAbi.friendlyError(msg);
+                            }
+                        } else {
+                            msg = EngineAbi.friendlyError(msg);
+                            if (msg == null) msg = "Download failed";
+                        }
+                        emitter.emitFailed(jobId, tailLog(log, msg));
                     }
                 });
 
@@ -334,18 +348,72 @@ public class YtDlpExecutor {
         return "m4a".equals(ext) || "mp3".equals(ext) || "opus".equals(ext) || "aac".equals(ext);
     }
 
+    private String resolveTitleForDownload(String url, String fallbackTitle) {
+        if (!looksLikeWeakTitle(fallbackTitle)) {
+            return fallbackTitle;
+        }
+        try {
+            String json = YtDlpEngineHelper.runJsonProbe(context, url, false);
+            JSONObject root = new JSONObject(json);
+            if (root.has("entries")) {
+                JSONArray arr = root.getJSONArray("entries");
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject e = arr.optJSONObject(i);
+                    if (e == null || isDeadEntry(e)) continue;
+                    String t = e.optString("title", "").trim();
+                    if (!t.isEmpty()) return t;
+                }
+            } else if (!isDeadEntry(root)) {
+                String t = root.optString("title", "").trim();
+                if (!t.isEmpty()) return t;
+            }
+        } catch (Exception ignored) {
+            /* use fallback */
+        }
+        return fallbackTitle != null && !fallbackTitle.isEmpty() ? fallbackTitle : "download";
+    }
+
+    private static String finalDisplayTitle(String title, String displayPath) {
+        if (!looksLikeWeakTitle(title)) return title;
+        if (displayPath == null || displayPath.isEmpty()) return title;
+        int slash = displayPath.lastIndexOf('/');
+        String fileName = slash >= 0 ? displayPath.substring(slash + 1) : displayPath;
+        int dot = fileName.lastIndexOf('.');
+        String base = dot > 0 ? fileName.substring(0, dot) : fileName;
+        base = base.replace('_', ' ').trim();
+        if (!base.isEmpty() && !looksLikeWeakTitle(base)) return base;
+        return title;
+    }
+
+    private static boolean looksLikeWeakTitle(String title) {
+        if (title == null) return true;
+        String t = title.trim();
+        if (t.isEmpty()) return true;
+        if ("watch".equals(t) || "shorts".equals(t)) return true;
+        if (t.matches("(?i)^media(\\s+#\\d+)?$")) return true;
+        return t.matches("^[a-zA-Z0-9_-]{11}$");
+    }
+
     private static String extractFailureReason(StringBuilder log) {
         if (log == null || log.length() == 0) return null;
         String text = log.toString();
+        String best = null;
         for (String line : text.split("\n")) {
             String trimmed = line.trim();
+            if (trimmed.isEmpty()) continue;
+            String msg = null;
             if (trimmed.startsWith("ERROR:")) {
-                String msg = trimmed.substring(6).trim();
-                if (msg.length() > 160) msg = msg.substring(0, 160) + "…";
-                return msg;
+                msg = trimmed.substring(6).trim();
+            } else if (trimmed.startsWith("error:")) {
+                msg = trimmed.substring(6).trim();
+            }
+            if (msg != null && !msg.isEmpty()) {
+                best = msg;
             }
         }
-        return null;
+        if (best == null) return null;
+        if (best.length() > 200) best = best.substring(0, 200) + "…";
+        return best;
     }
 
     private static String tailLog(StringBuilder log, String fallback) {

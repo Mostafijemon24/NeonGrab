@@ -8,7 +8,12 @@ import { useSettings } from "@/context/SettingsContext";
 import { formatFolderLabel, getDownloadFolder } from "@/services/downloadLocation";
 import type { DownloadJob } from "@/services/downloadEngine";
 import { openDownloadedFile } from "@/services/openMedia";
-import { formatBytes } from "@/lib/utils";
+import {
+  displayJobTitle,
+  formatBytes,
+  folderFromDisplayPath,
+  shortenText,
+} from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 export function VaultScreen() {
@@ -78,7 +83,7 @@ export function VaultScreen() {
             <Card
               key={job.id}
               className={cn(
-                "backdrop-blur-xl rounded-2xl bg-zinc-900/50 border-white/10 p-4 transition-colors",
+                "backdrop-blur-xl rounded-2xl bg-zinc-900/50 border-white/10 p-4 transition-colors overflow-hidden",
                 canOpen(job) && "active:bg-zinc-800/60 cursor-pointer",
               )}
             >
@@ -86,9 +91,9 @@ export function VaultScreen() {
                 type="button"
                 disabled={!canOpen(job)}
                 onClick={() => void handleOpen(job)}
-                className="w-full text-left disabled:cursor-default"
+                className="w-full min-w-0 overflow-hidden text-left disabled:cursor-default"
               >
-                <CardContent className="p-0 flex items-center gap-3">
+                <CardContent className="p-0 flex items-center gap-3 min-w-0 overflow-hidden">
                   <div className="size-10 shrink-0 rounded-xl bg-[#7f22fe]/15 border border-[#7f22fe]/30 flex justify-center items-center">
                     {job.kind === "video" ? (
                       <Film className="size-5 text-[#7f22fe]" />
@@ -96,18 +101,26 @@ export function VaultScreen() {
                       <Music className="size-5 text-[oklch(0.78_0.13_210)]" />
                     )}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-neutral-50 text-sm">
-                      {job.title}
+                  <div className="flex-1 min-w-0 overflow-hidden">
+                    <p
+                      className="font-medium text-neutral-50 text-sm leading-snug break-words [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden"
+                      title={displayJobTitle(job)}
+                    >
+                      {displayJobTitle(job)}
                     </p>
                     <p
-                      className="text-[#9f9fa9] text-[11px] truncate"
+                      className="text-[#9f9fa9] text-[11px] truncate mt-0.5"
                       title={job.filePath}
                     >
-                      {formatBytes(job.totalBytes)} ·{" "}
+                      {formatBytes(job.totalBytes)}
                       {job.filePath
-                        ? tr("savedTo", { path: job.filePath })
-                        : tr("downloadComplete")}
+                        ? ` · ${tr("savedTo", {
+                            path: shortenText(
+                              folderFromDisplayPath(job.filePath),
+                              28,
+                            ),
+                          })}`
+                        : ` · ${tr("downloadComplete")}`}
                     </p>
                   </div>
                   {canOpen(job) && (

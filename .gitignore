@@ -7,7 +7,9 @@ android/.gradle
 android/app/build
 android/build
 .capacitor
+/lib/
 
-# APKs are attached to GitHub Releases (too large for git; engine ~200 MB)
+# APKs and engine packs are attached to GitHub Releases (too large for git)
 releases/*.apk
+releases/*.zip
 !releases/.gitkeep
