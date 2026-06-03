@@ -23,3 +23,20 @@
 -keep class com.yausername.youtubedl_android.** { *; }
 -keep class com.yausername.ffmpeg.** { *; }
 -keep class com.neongrab.downloader.ytdlp.** { *; }
+
+# Jackson ObjectMapper is used by youtubedl-android for JSON serialization.
+# Without explicit keep rules, R8 may rename or remove Jackson classes, causing
+# ExceptionInInitializerError when YoutubeDL.INSTANCE is first accessed.
+-keep class com.fasterxml.jackson.** { *; }
+-keepnames class com.fasterxml.jackson.** { *; }
+-dontwarn com.fasterxml.jackson.**
+
+# Apache Commons Compress is used by youtubedl-android's ZipUtils to unpack
+# libpython.zip.so and libffmpeg.zip.so into noBackupFilesDir on first launch.
+-keep class org.apache.commons.compress.** { *; }
+-keep class org.apache.commons.io.** { *; }
+-dontwarn org.apache.commons.**
+
+# Kotlin coroutines and stdlib
+-dontwarn kotlin.**
+-dontwarn kotlinx.**

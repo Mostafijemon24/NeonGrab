@@ -186,7 +186,7 @@ public class YtDlpPlugin extends Plugin {
                             return;
                         }
                         YtDlpBinaryProvider.ensureInstalled(ctx);
-                    } catch (Exception ignored) {
+                    } catch (Throwable ignored) {
                         /* UI layer will retry with progress */
                     }
                 });
@@ -197,11 +197,11 @@ public class YtDlpPlugin extends Plugin {
                 () -> {
                     try {
                         task.run();
-                    } catch (Exception e) {
+                    } catch (Throwable e) {
+                        String msg = e.getMessage();
                         call.reject(
-                                e.getMessage() != null ? e.getMessage() : "Engine setup failed",
-                                "ENGINE_SETUP_FAILED",
-                                e);
+                                msg != null ? msg : "Engine setup failed",
+                                "ENGINE_SETUP_FAILED");
                     }
                 });
     }
