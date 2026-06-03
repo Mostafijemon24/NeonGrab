@@ -1,3 +1,6 @@
+import { Capacitor } from "@capacitor/core";
+import { extractUrlsFromText, isValidHttpUrl } from "./urlInput";
+
 export type MediaKind = "video" | "audio";
 
 export type ResolvedItem = {
@@ -11,19 +14,7 @@ export type ResolvedItem = {
 export type ResolveResult =
   | { ok: true; batch: false; item: ResolvedItem }
   | { ok: true; batch: true; items: ResolvedItem[]; label: string }
-  | { ok: false; reason: "invalid" | "unsupported" };
-
-const URL_PATTERN =
-  /^https?:\/\/[\w.-]+(?:\.[\w.-]+)+[\w\-._~:/?#[\]@!$&'()*+,;=%.]*$/i;
-
-function isValidUrl(raw: string): boolean {
-  try {
-    const u = new URL(raw.trim());
-    return (u.protocol === "http:" || u.protocol === "https:") && URL_PATTERN.test(raw.trim());
-  } catch {
-    return false;
-  }
-}
+  | { ok: false; reason: "invalid" | "unsupported" | "probeFailed" };
 
 function hashId(seed: string): string {
   let h = 0;
@@ -37,9 +28,9 @@ function guessKind(url: string): MediaKind {
   return "video";
 }
 
-function estimateSize(kind: MediaKind, batch = false): number {
+function estimateSize(kind: MediaKind): number {
   const base = kind === "audio" ? 8 * 1024 * 1024 : 120 * 1024 * 1024;
-  return batch ? base : base * (0.4 + Math.random() * 0.6);
+  return base * (0.4 + Math.random() * 0.6);
 }
 
 function titleFromUrl(url: string, index?: number): string {
@@ -49,11 +40,10 @@ function titleFromUrl(url: string, index?: number): string {
   } catch {
     /* ignore */
   }
-  const suffix = index !== undefined ? `_${String(index + 1).padStart(2, "0")}` : "";
-  return `media${suffix}.mp4`;
+  const suffix = index !== undefined ? ` #${index + 1}` : "";
+  return `media${suffix}`;
 }
 
-/** Detect playlist-style URLs without exposing platform names in UI */
 function isPlaylistUrl(url: string): boolean {
   const u = url.toLowerCase();
   return (
@@ -61,56 +51,110 @@ function isPlaylistUrl(url: string): boolean {
     u.includes("/playlist") ||
     u.includes("/channel/") ||
     u.includes("/user/") ||
-    u.includes("/@") && u.includes("/videos") ||
+    (u.includes("/@") && u.includes("/videos")) ||
     u.includes("album") ||
     u.includes("/series/")
   );
 }
 
-function expandPlaylist(url: string): ResolvedItem[] {
-  const count = Math.min(24, 6 + Math.floor((url.length % 12) + 4));
-  return Array.from({ length: count }, (_, i) => {
-    const id = hashId(`${url}_${i}`);
-    const kind = guessKind(url);
-    return {
-      id,
-      title: titleFromUrl(url, i),
-      kind,
-      estimatedBytes: estimateSize(kind, true) / count,
-      sourceUrl: url,
-    };
-  });
+function fallbackItem(url: string, index?: number): ResolvedItem {
+  const kind = guessKind(url);
+  return {
+    id: hashId(index !== undefined ? `${url}_${index}` : url),
+    title: titleFromUrl(url, index),
+    kind,
+    estimatedBytes: estimateSize(kind),
+    sourceUrl: url,
+  };
+}
+
+async function probeOne(url: string, flatPlaylist: boolean): Promise<ResolvedItem[] | null> {
+  const { probeUrlNative } = await import("./nativeYtDlp");
+  return probeUrlNative(url, flatPlaylist);
+}
+
+async function resolveSingleUrl(url: string): Promise<ResolvedItem | null> {
+  if (!isValidHttpUrl(url)) return null;
+
+  const probed = await probeOne(url, false);
+  if (probed?.length === 1) return probed[0];
+  if (probed && probed.length > 1) return probed[0];
+
+  if (Capacitor.getPlatform() === "android") {
+    const probedLoose = await probeOne(url, true);
+    if (probedLoose?.length) return probedLoose[0];
+  }
+
+  return fallbackItem(url);
+}
+
+async function resolvePlaylistUrl(url: string): Promise<ResolvedItem[] | null> {
+  if (!isValidHttpUrl(url)) return null;
+
+  const probed = await probeOne(url, true);
+  if (probed && probed.length > 0) return probed;
+
+  if (Capacitor.getPlatform() === "android") return null;
+
+  return null;
+}
+
+async function resolveMultipleUrls(urls: string[]): Promise<ResolvedItem[]> {
+  const items: ResolvedItem[] = [];
+  const seen = new Set<string>();
+
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+    if (!isValidHttpUrl(url) || seen.has(url)) continue;
+    seen.add(url);
+
+    const item = await resolveSingleUrl(url);
+    if (item) {
+      items.push({
+        ...item,
+        id: hashId(`${item.sourceUrl}_${items.length}`),
+        title: item.title || titleFromUrl(url, items.length),
+      });
+    }
+  }
+
+  return items;
 }
 
 export async function resolveMediaUrl(
   raw: string,
   forceBatch?: boolean,
 ): Promise<ResolveResult> {
-  const url = raw.trim();
-  if (!isValidUrl(url)) return { ok: false, reason: "invalid" };
+  const urls = extractUrlsFromText(raw);
+  if (urls.length === 0) return { ok: false, reason: "invalid" };
 
-  const batch = forceBatch ?? isPlaylistUrl(url);
-
-  const { probeUrlNative } = await import("./nativeYtDlp");
-  const nativeItems = await probeUrlNative(url, batch);
-  if (nativeItems && nativeItems.length > 0) {
-    if (nativeItems.length === 1) {
-      return { ok: true, batch: false, item: nativeItems[0] };
+  if (urls.length > 1) {
+    const items = await resolveMultipleUrls(urls);
+    if (items.length === 0) {
+      return {
+        ok: false,
+        reason: Capacitor.getPlatform() === "android" ? "probeFailed" : "invalid",
+      };
     }
     return {
       ok: true,
       batch: true,
-      items: nativeItems,
-      label: `${nativeItems.length} items`,
+      items,
+      label: `${items.length} links`,
     };
   }
 
-  await new Promise((r) => setTimeout(r, 200));
+  const url = urls[0];
+  const wantPlaylist = forceBatch === true || (forceBatch !== false && isPlaylistUrl(url));
 
-  const kind = guessKind(url);
-
-  if (batch) {
-    const items = expandPlaylist(url);
+  if (wantPlaylist) {
+    const items = await resolvePlaylistUrl(url);
+    if (!items || items.length === 0) {
+      return { ok: false, reason: "probeFailed" };
+    }
+    if (items.length === 1) {
+      return { ok: true, batch: false, item: items[0] };
+    }
     return {
       ok: true,
       batch: true,
@@ -119,15 +163,7 @@ export async function resolveMediaUrl(
     };
   }
 
-  return {
-    ok: true,
-    batch: false,
-    item: {
-      id: hashId(url),
-      title: titleFromUrl(url),
-      kind,
-      estimatedBytes: estimateSize(kind),
-      sourceUrl: url,
-    },
-  };
+  const item = await resolveSingleUrl(url);
+  if (!item) return { ok: false, reason: "invalid" };
+  return { ok: true, batch: false, item };
 }

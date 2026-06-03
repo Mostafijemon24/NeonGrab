@@ -16,6 +16,7 @@ import { Capacitor } from "@capacitor/core";
 import { getDownloadFolder } from "@/services/downloadLocation";
 import { ensureYtDlpBinary } from "@/services/nativeYtDlp";
 import { resolveMediaUrl } from "@/services/urlResolver";
+import { extractUrlsFromText } from "@/services/urlInput";
 import { useSettings } from "./SettingsContext";
 
 type DownloadContextValue = {
@@ -28,7 +29,7 @@ type DownloadContextValue = {
   enqueueUrl: (
     url: string,
     batchMode: boolean,
-  ) => Promise<{ ok: boolean; count: number; error?: string }>;
+  ) => Promise<{ ok: boolean; count: number; started: number; error?: string }>;
   pause: (id: string) => void;
   resume: (id: string) => void;
   cancel: (id: string) => void;
@@ -47,9 +48,21 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   } = useSettings();
   const [jobs, setJobs] = useState<DownloadJob[]>([]);
   const engineRef = useRef<DownloadEngine | null>(null);
+  const optionsRef = useRef({
+    getMaxConcurrent: () => maxConcurrent,
+    getMaxThreads: () => maxThreads,
+    thermalGuard: () => thermalGuard,
+    getQuality: () => quality,
+  });
+
+  optionsRef.current = {
+    getMaxConcurrent: () => maxConcurrent,
+    getMaxThreads: () => maxThreads,
+    thermalGuard: () => thermalGuard,
+    getQuality: () => quality,
+  };
 
   const refresh = useCallback(() => {
-    engineRef.current?.getAllJobs();
     setJobs(engineRef.current?.getAllJobs() ?? []);
   }, []);
 
@@ -60,51 +73,66 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         onComplete: () => refresh(),
       },
       {
-        getMaxConcurrent: () => maxConcurrent,
-        getMaxThreads: () => maxThreads,
-        thermalGuard: () => thermalGuard,
-        getQuality: () => quality,
+        getMaxConcurrent: () => optionsRef.current.getMaxConcurrent(),
+        getMaxThreads: () => optionsRef.current.getMaxThreads(),
+        thermalGuard: () => optionsRef.current.thermalGuard(),
+        getQuality: () => optionsRef.current.getQuality(),
       },
     );
     engineRef.current = engine;
+    refresh();
     return () => {
       engine.dispose();
       engineRef.current = null;
     };
-  }, [maxConcurrent, maxThreads, thermalGuard, quality, refresh]);
+  }, [refresh]);
 
   const enqueueUrl = useCallback(
-    async (url: string, batchMode: boolean) => {
+    async (raw: string, batchMode: boolean) => {
+      const urls = extractUrlsFromText(raw);
+      if (urls.length === 0) {
+        return { ok: false, count: 0, started: 0, error: "invalidUrl" };
+      }
+
       if (wifiOnly && typeof navigator !== "undefined") {
         const conn = (navigator as Navigator & { connection?: { type?: string } })
           .connection;
         if (conn?.type === "cellular") {
-          return { ok: false, count: 0 };
+          return { ok: false, count: 0, started: 0, error: "wifiOnlyBlocked" };
         }
       }
 
       if (Capacitor.getPlatform() === "android") {
         const folder = await getDownloadFolder();
         if (!folder.configured) {
-          return { ok: false, count: 0, error: "folderRequired" };
+          return { ok: false, count: 0, started: 0, error: "folderRequired" };
         }
         const ready = await ensureYtDlpBinary();
         if (!ready) {
-          return { ok: false, count: 0, error: "engineNotReady" };
+          return { ok: false, count: 0, started: 0, error: "engineNotReady" };
         }
         await engineRef.current?.prepareNative();
       }
 
-      const result = await resolveMediaUrl(url, batchMode);
-      if (!result.ok) return { ok: false, count: 0, error: "invalidUrl" };
+      const result = await resolveMediaUrl(raw, batchMode);
+      if (!result.ok) {
+        const err =
+          result.reason === "probeFailed" ? "probeFailed" : "invalidUrl";
+        return { ok: false, count: 0, started: 0, error: err };
+      }
 
       const engine = engineRef.current;
-      if (!engine) return { ok: false, count: 0 };
+      if (!engine) return { ok: false, count: 0, started: 0 };
 
       const items = result.batch ? result.items : [result.item];
-      for (const item of items) engine.enqueue(item);
+      let started = 0;
+      for (const item of items) {
+        const job = engine.enqueue(item);
+        if (job.status === "queued" || job.status === "downloading") started += 1;
+      }
       refresh();
-      return { ok: true, count: items.length };
+
+      return { ok: true, count: items.length, started };
     },
     [wifiOnly, refresh],
   );
@@ -115,7 +143,8 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         (j) =>
           j.status === "downloading" ||
           j.status === "queued" ||
-          j.status === "paused",
+          j.status === "paused" ||
+          j.status === "failed",
       ),
     [jobs],
   );

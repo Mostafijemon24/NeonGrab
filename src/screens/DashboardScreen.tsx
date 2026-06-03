@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { QueueItem } from "@/components/QueueItem";
 import { useDownloads } from "@/context/DownloadContext";
 import { useSettings } from "@/context/SettingsContext";
+import { extractUrlsFromText } from "@/services/urlInput";
 import { formatSpeed } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
@@ -39,14 +40,24 @@ export function DashboardScreen() {
   const [error, setError] = useState<string | null>(null);
   const [batchHint, setBatchHint] = useState<string | null>(null);
 
+  const applyPastedText = (text: string) => {
+    const urls = extractUrlsFromText(text);
+    if (urls.length === 0) {
+      setUrl(text.trim());
+      return;
+    }
+    setUrl(urls.join("\n"));
+    setError(null);
+  };
+
   const pasteFromClipboard = async () => {
     try {
       const { value } = await Clipboard.read();
-      if (value) setUrl(value);
+      if (value) applyPastedText(value);
     } catch {
       try {
         const text = await navigator.clipboard.readText();
-        setUrl(text);
+        applyPastedText(text);
       } catch {
         /* ignore */
       }
@@ -58,14 +69,24 @@ export function DashboardScreen() {
     setLoading(true);
     setError(null);
     setBatchHint(null);
-    const { ok, count, error: errKey } = await enqueueUrl(url.trim(), mode === "batch");
+    const { ok, count, started, error: errKey } = await enqueueUrl(url, mode === "batch");
     setLoading(false);
     if (!ok) {
-      const key =
-        errKey === "engineNotReady" || errKey === "folderRequired" || errKey === "invalidUrl"
-          ? errKey
-          : "invalidUrl";
+      const known = [
+        "engineNotReady",
+        "folderRequired",
+        "invalidUrl",
+        "probeFailed",
+        "wifiOnlyBlocked",
+      ] as const;
+      const key = known.includes(errKey as (typeof known)[number])
+        ? (errKey as (typeof known)[number])
+        : "invalidUrl";
       setError(tr(key));
+      return;
+    }
+    if (started === 0) {
+      setError(tr("noDownloadStarted"));
       return;
     }
     if (count > 1) setBatchHint(tr("itemsFound", { count }));
@@ -171,13 +192,14 @@ export function DashboardScreen() {
         <CardContent className="p-0 gap-3">
           <div className="rounded-2xl bg-zinc-800/60 border-white/10 border flex px-3 py-2.5 items-center gap-2">
             <Globe className="size-4 shrink-0 text-[#9f9fa9]" />
-            <input
+            <textarea
               value={url}
+              rows={mode === "batch" ? 3 : 1}
               onChange={(e) => setUrl(e.target.value)}
               placeholder={
-                mode === "batch" ? tr("pastePlaylist") : tr("pasteUrl")
+                mode === "batch" ? tr("pasteBatch") : tr("pasteUrl")
               }
-              className="bg-transparent outline-none text-sm leading-5 flex-1 text-neutral-50 placeholder:text-[#9f9fa9]/70 min-w-0"
+              className="bg-transparent outline-none resize-none text-sm leading-5 flex-1 text-neutral-50 placeholder:text-[#9f9fa9]/70 min-w-0"
             />
             <button type="button" onClick={pasteFromClipboard} aria-label="Paste">
               <ClipboardPaste className="size-4 text-[oklch(0.78_0.13_210)]" />

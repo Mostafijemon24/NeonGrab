@@ -79,9 +79,10 @@ public class YtDlpExecutor {
                     try {
                         List<String> cmd = baseCommand();
                         cmd.add("-J");
-                        cmd.add("--no-playlist");
                         if (flatPlaylist) {
                             cmd.add("--flat-playlist");
+                        } else {
+                            cmd.add("--no-playlist");
                         }
                         cmd.add(url);
                         String json = runAndCapture(cmd);

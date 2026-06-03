@@ -144,9 +144,37 @@ export class DownloadEngine {
 
   enqueue(item: ResolvedItem): DownloadJob {
     const existing = this.jobs.get(item.id);
-    if (existing && existing.status !== "failed") return existing;
+    if (
+      existing &&
+      (existing.status === "downloading" ||
+        existing.status === "queued" ||
+        existing.status === "paused")
+    ) {
+      return existing;
+    }
 
     const maxThreads = this.options.getMaxThreads();
+    if (existing) {
+      existing.title = item.title;
+      existing.kind = item.kind;
+      existing.totalBytes = item.estimatedBytes;
+      existing.downloadedBytes = 0;
+      existing.progress = 0;
+      existing.segments = segmentCount(item.estimatedBytes, maxThreads);
+      existing.status = "queued";
+      existing.speedBps = 0;
+      existing.sourceUrl = item.sourceUrl;
+      existing.createdAt = Date.now();
+      existing.completedAt = undefined;
+      existing.filePath = undefined;
+      existing.openUri = undefined;
+      existing.mimeType = undefined;
+      existing.native = this.nativeReady;
+      this.callbacks.onUpdate(existing);
+      this.pump();
+      return existing;
+    }
+
     const job: DownloadJob = {
       id: item.id,
       title: item.title,
@@ -218,6 +246,10 @@ export class DownloadEngine {
         this.jobs.delete(id);
       }
     }
+  }
+
+  countByStatus(...statuses: DownloadStatus[]): number {
+    return [...this.jobs.values()].filter((j) => statuses.includes(j.status)).length;
   }
 
   private effectiveConcurrency(): number {
