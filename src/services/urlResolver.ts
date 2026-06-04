@@ -69,7 +69,7 @@ export function normalizeMediaUrl(url: string): string {
     const host = u.hostname.toLowerCase();
 
     if (host.includes("xhamster")) {
-      u.hostname = "www.xhamster.com";
+      /* Keep regional host (xhamster1.desi, etc.) — only strip tracking query */
       if (u.pathname.includes("/videos/")) {
         u.search = "";
         u.hash = "";

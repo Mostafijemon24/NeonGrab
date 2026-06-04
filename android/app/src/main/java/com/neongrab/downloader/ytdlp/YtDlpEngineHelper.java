@@ -155,6 +155,7 @@ public final class YtDlpEngineHelper {
                 if (!initialized) {
                     report(48, "Initializing engine…");
                     initBundledLibraries(app);
+                    YtDlpAssetPatcher.applyBundledScriptIfPresent(app);
                     report(65, "Runtime ready");
                 }
 
@@ -508,6 +509,7 @@ public final class YtDlpEngineHelper {
         String url = cleanDownloadUrl(rawUrl);
         if (isAdultSiteUrl(url.toLowerCase())) {
             ensureFreshYtDlpForSites(app);
+            YtDlpAssetPatcher.applyBundledScriptIfPresent(app);
         }
         YoutubeDLRequest request = new YoutubeDLRequest(url);
         request.addOption("--no-warnings");
@@ -531,7 +533,7 @@ public final class YtDlpEngineHelper {
            Without --http-chunk-size yt-dlp uses a single TCP stream even if
            --concurrent-fragments > 1. Chunking splits the file into N pieces
            each fetched in its own connection, multiplying effective throughput. */
-        if (nonYoutube) {
+        if (nonYoutube && !isXhamsterUrl(url.toLowerCase())) {
             request.addOption("--http-chunk-size");
             request.addOption("10485760"); // 10 MB per chunk
         }
@@ -611,11 +613,9 @@ public final class YtDlpEngineHelper {
             if (!isAdultSiteUrl((lowerHost + path).toLowerCase())) {
                 return url;
             }
-            if (lowerHost.contains("xhamster")) {
-                host = "www.xhamster.com";
-            } else if (lowerHost.contains("pornhub")) {
+            if (lowerHost.contains("pornhub")) {
                 host = "www.pornhub.com";
-            } else if (!host.startsWith("www.")) {
+            } else if (!lowerHost.contains("xhamster") && !host.startsWith("www.")) {
                 host = "www." + host;
             }
             if (path.contains("/videos/") || path.contains("/view_video")) {
@@ -676,9 +676,17 @@ public final class YtDlpEngineHelper {
             }
             request.addOption("--age-limit", "99");
             request.addOption("--no-check-certificates");
+            request.addOption("--geo-bypass");
             request.addOption(
                     "--add-header",
-                    "Cookie: age_verified=1; cookies_accepted=1; parental-control=no");
+                    "Cookie: "
+                            + "age_verified=1; "
+                            + "accessAgeDisclaimerPH=1; "
+                            + "accessAgeDisclaimerUK=1; "
+                            + "cookies_accepted=1; "
+                            + "cookie_banner=1; "
+                            + "parental-control=no; "
+                            + "x_accept_cookies=1");
         } else if (isAdultSiteUrl(lowerUrl)) {
             /* PornHub/CDN need site-root Referer (not the watch URL) — see yt-dlp #15827 */
             request.addOption("--user-agent", DESKTOP_UA);
@@ -708,7 +716,7 @@ public final class YtDlpEngineHelper {
                 || lowerUrl.contains("fb.com/");
     }
 
-    private static boolean isXhamsterUrl(String lowerUrl) {
+    static boolean isXhamsterUrl(String lowerUrl) {
         return lowerUrl != null && lowerUrl.contains("xhamster.");
     }
 

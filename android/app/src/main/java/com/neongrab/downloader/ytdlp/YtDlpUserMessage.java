@@ -32,6 +32,10 @@ public final class YtDlpUserMessage {
             return "xHamster/Porn sites often block extractors. Open Settings → Retry engine on Wi‑Fi, "
                     + "paste a direct video link (remove referral/tracking from the URL).";
         }
+        if (lower.contains("no video formats")) {
+            return "Site returned no downloadable formats (age gate or region block). "
+                    + "Settings → Retry engine on Wi‑Fi. Try VPN, or open the video in browser first.";
+        }
         if (lower.contains("extractor error")) {
             return "Could not read this video (site blocked or outdated engine). "
                     + "Settings → Retry engine on Wi‑Fi, then try again.";

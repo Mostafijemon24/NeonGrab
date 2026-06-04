@@ -406,21 +406,24 @@ public class YtDlpExecutor {
             StringBuilder log)
             throws Exception {
         long totalEstimate = 100 * 1024 * 1024;
-        String[] formats = {
-            YtDlpFormatSelector.formatForQuality(quality, audioOnly, url),
-            "best/bestvideo+bestaudio/best",
-        };
+        YtDlpFormatSelector.FormatPlan[] plans =
+                YtDlpFormatSelector.downloadPlans(quality, audioOnly, url);
 
         File saved = null;
-        for (int attempt = 0; attempt < formats.length; attempt++) {
+        for (int attempt = 0; attempt < plans.length; attempt++) {
             if (job.cancelled.get()) return null;
             deleteMediaInDir(tempDir);
 
+            if (YtDlpEngineHelper.isXhamsterUrl(url.toLowerCase()) && attempt == 1) {
+                YtDlpEngineHelper.ensureFreshYtDlpForSites(context.getApplicationContext());
+            }
+
+            YtDlpFormatSelector.FormatPlan plan = plans[attempt];
             List<String> args =
                     YtDlpEngineHelper.buildDownloadArgs(
                             outTemplate,
-                            formats[attempt],
-                            YtDlpFormatSelector.mergeFormat(),
+                            plan.format,
+                            plan.mergeFormat,
                             maxThreads,
                             audioOnly);
             args.add(url);
@@ -461,10 +464,10 @@ public class YtDlpExecutor {
             }
 
             String reason = extractFailureReason(log);
-            if (attempt + 1 >= formats.length || !isRetryableExtractorFailure(reason)) {
+            if (attempt + 1 >= plans.length || !isRetryableExtractorFailure(reason)) {
                 break;
             }
-            log.append("\n--- retry with relaxed format ---\n");
+            log.append("\n--- retry format ").append(attempt + 2).append(" ---\n");
         }
         return saved;
     }
