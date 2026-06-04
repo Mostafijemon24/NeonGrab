@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+* {
+  scrollbar-width: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-size: 16px;
+  line-height: 24px;
+  font-family:
+    "Inter", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  background: #09090b;
+  color: #fafafa;
+}
+
+@theme inline {
+  --radius: 0.625rem;
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --primary: oklch(0.541 0.281 293.009);
+  --primary-foreground: oklch(0.969 0.016 293.756);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --border: oklch(1 0 0 / 10%);
+  --color-primary: var(--primary);
+}
+
+.bg-primary {
+  background: var(--color-primary);
+}
+
+.text-primary {
+  color: var(--color-primary);
+}
+
+.from-primary {
+  --tw-gradient-from: var(--color-primary);
+}
+
+.safe-pb {
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+}

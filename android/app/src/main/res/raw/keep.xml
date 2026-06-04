@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Prevents R8's resource shrinker from removing the yt-dlp Python script that
+  youtubedl-android bundles as R.raw.ytdlp. Without this, shrinkResources=true
+  can silently drop the resource, causing init_ytdlp to throw
+  Resources$NotFoundException on first launch.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@raw/ytdlp"/>
