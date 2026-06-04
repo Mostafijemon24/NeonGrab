@@ -80,6 +80,7 @@ export interface YtDlpPlugin {
   getDownloadFolder(): Promise<DownloadFolderInfo>;
   pickDownloadFolder(): Promise<DownloadFolderInfo>;
   probe(options: { url: string; flatPlaylist?: boolean }): Promise<YtDlpProbeResult>;
+  extractViaWebView(options: { url: string }): Promise<{ streamUrl: string; title: string }>;
   download(options: YtDlpDownloadOptions): Promise<{ ok: boolean; message?: string }>;
   pause(options: { jobId: string }): Promise<void>;
   resume(options: { jobId: string }): Promise<void>;

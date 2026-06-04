@@ -272,6 +272,30 @@ public class YtDlpPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void extractViaWebView(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null || url.isEmpty()) {
+            call.reject("url is required", "INVALID_URL");
+            return;
+        }
+
+        WebViewExtractor.extract(getContext(), url, new WebViewExtractor.Callback() {
+            @Override
+            public void onSuccess(String streamUrl, String title) {
+                JSObject ret = new JSObject();
+                ret.put("streamUrl", streamUrl);
+                ret.put("title", title);
+                call.resolve(ret);
+            }
+
+            @Override
+            public void onError(String error) {
+                call.reject(error, "WEBVIEW_EXTRACT_ERROR");
+            }
+        });
+    }
+
+    @PluginMethod
     public void download(PluginCall call) {
         String jobId = call.getString("jobId");
         String url = call.getString("url");

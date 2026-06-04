@@ -97,7 +97,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setMaxConcurrent: (maxConcurrent) =>
         update({ maxConcurrent: Math.min(4, Math.max(1, maxConcurrent)) }),
       setMaxThreads: (maxThreads) =>
-        update({ maxThreads: Math.min(8, Math.max(2, maxThreads)) }),
+        update({ maxThreads: Math.min(16, Math.max(2, maxThreads)) }),
       setThermalGuard: (thermalGuard) => update({ thermalGuard }),
       setWifiOnly: (wifiOnly) => update({ wifiOnly }),
       setQuality: (quality) => update({ quality }),

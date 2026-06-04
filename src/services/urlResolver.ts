@@ -179,12 +179,29 @@ async function resolveSingleUrl(
 
   const normalized = normalizeMediaUrl(url);
 
-  /* xHamster/PornHub: probe often fails (KeyError title) while download works — skip probe */
+  /* xHamster/PornHub: probe often fails due to bot protection. Try WebView interceptor first. */
   if (
     Capacitor.getPlatform() === "android" &&
     isAdultMediaUrl(normalized) &&
     isDirectVideoPage(normalized)
   ) {
+    try {
+      const { extractUrlViaWebViewNative } = await import("./nativeYtDlp");
+      const extracted = await extractUrlViaWebViewNative(normalized);
+      if (extracted && extracted.streamUrl) {
+        return {
+          item: {
+            id: hashId(normalized),
+            title: extracted.title || titleFromUrl(normalized),
+            kind: "video",
+            estimatedBytes: estimateSize("video"),
+            sourceUrl: extracted.streamUrl, // Use the direct M3U8/MP4 stream
+          },
+        };
+      }
+    } catch (e) {
+      console.warn("WebView extraction fallback failed", e);
+    }
     return { item: fallbackItem(normalized) };
   }
 

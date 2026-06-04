@@ -163,6 +163,14 @@ function pluginErrorMessage(e: unknown): string {
   return "Probe failed";
 }
 
+export async function extractUrlViaWebViewNative(url: string): Promise<{ streamUrl: string; title: string }> {
+  const ready = await ensureYtDlpBinary();
+  if (!ready) {
+    throw new Error("Download engine is not ready");
+  }
+  return YtDlp.extractViaWebView({ url });
+}
+
 export async function probeUrlNative(
   url: string,
   flatPlaylist: boolean,

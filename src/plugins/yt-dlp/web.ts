@@ -38,6 +38,10 @@ export class YtDlpWeb extends WebPlugin implements YtDlpPlugin {
     return { ok: false, batch: false, entries: [], message: "Native probe unavailable on web." };
   }
 
+  async extractViaWebView(): Promise<{ streamUrl: string; title: string }> {
+    throw this.unavailable("WebView extraction is available on Android only.");
+  }
+
   async download(_options: YtDlpDownloadOptions): Promise<{ ok: boolean; message?: string }> {
     return { ok: false, message: "Native download unavailable on web." };
   }

@@ -762,7 +762,7 @@ public final class YtDlpEngineHelper {
         args.add("--retries");
         args.add("3");
         args.add("--concurrent-fragments");
-        args.add(String.valueOf(Math.max(2, Math.min(maxThreads, 8))));
+        args.add(String.valueOf(Math.max(2, Math.min(maxThreads, 16))));
         args.add("--no-playlist");
         args.add("--no-embed-metadata");
         args.add("--no-embed-thumbnail");

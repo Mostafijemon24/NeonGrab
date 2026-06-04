@@ -223,7 +223,7 @@ export function SettingsScreen() {
             <input
               type="range"
               min={2}
-              max={8}
+              max={16}
               value={maxThreads}
               onChange={(e) => setMaxThreads(Number(e.target.value))}
               className="w-full accent-[#7f22fe]"
