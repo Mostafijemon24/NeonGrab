@@ -145,10 +145,19 @@ export type ProbeUrlResult = {
 function pluginErrorMessage(e: unknown): string {
   if (!e || typeof e !== "object") return "Probe failed";
   const err = e as { message?: string; code?: string };
-  const message = err.message?.trim() ?? "";
+  let message = err.message?.trim() ?? "";
+  if (message.endsWith(" null")) {
+    message = message.slice(0, -5).trim();
+  }
   const code = err.code?.trim() ?? "";
   const looksLikeCode = (s: string) => /^[A-Z][A-Z0-9_]*$/.test(s);
-  if (message && !looksLikeCode(message)) return message;
+  if (message && !looksLikeCode(message)) {
+    const lower = message.toLowerCase();
+    if (lower.includes("keyerror") || lower.includes("extractor error")) {
+      return "Could not read link — open Settings, tap Retry engine on Wi‑Fi, use a direct video URL without referral text.";
+    }
+    return message;
+  }
   if (code && !looksLikeCode(code)) return code;
   if (message) return message;
   return "Probe failed";

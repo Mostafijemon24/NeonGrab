@@ -44,11 +44,43 @@ function titleFromUrl(url: string, index?: number): string {
   return `media${suffix}`;
 }
 
+const ADULT_HOST_RE =
+  /xhamster|pornhub|xvideos|xnxx|redtube|youporn|spankbang|tube8|tnaflix|hclips/i;
+
+export function isAdultMediaUrl(url: string): boolean {
+  return ADULT_HOST_RE.test(url);
+}
+
+function isExtractorProbeError(err?: string): boolean {
+  if (!err) return false;
+  const e = err.toLowerCase();
+  return (
+    e.includes("extractor error") ||
+    e.includes("keyerror") ||
+    e.includes("videomodel") ||
+    e.includes("playlist probe failed")
+  );
+}
+
 /** Normalize URL: fix YouTube hosts, strip tracking params (utm_*, si, fbclid, etc.). */
 export function normalizeMediaUrl(url: string): string {
   try {
     const u = new URL(url.trim());
     const host = u.hostname.toLowerCase();
+
+    if (host.includes("xhamster")) {
+      u.hostname = "www.xhamster.com";
+      if (u.pathname.includes("/videos/")) {
+        u.search = "";
+        u.hash = "";
+      }
+    } else if (host.includes("pornhub")) {
+      u.hostname = "www.pornhub.com";
+      if (u.pathname.includes("/view_video") || u.pathname.includes("/video")) {
+        u.search = "";
+        u.hash = "";
+      }
+    }
 
     // Normalize YouTube
     if (host === "youtube.com" || host === "m.youtube.com" || host === "youtu.be") {
@@ -65,9 +97,21 @@ export function normalizeMediaUrl(url: string): string {
     }
 
     // Strip tracking params for all sites
-    const TRACKING = ["si", "feature", "fbclid", "ref", "referer", "referrer"];
+    const TRACKING = [
+      "si",
+      "feature",
+      "fbclid",
+      "ref",
+      "referer",
+      "referrer",
+      "referral",
+      "campaign",
+      "source",
+      "medium",
+    ];
     for (const key of [...u.searchParams.keys()]) {
-      if (key.startsWith("utm_") || TRACKING.includes(key)) {
+      const lower = key.toLowerCase();
+      if (lower.startsWith("utm") || TRACKING.includes(lower)) {
         u.searchParams.delete(key);
       }
     }
@@ -114,17 +158,23 @@ async function resolveSingleUrl(
 ): Promise<{ item: ResolvedItem | null; probeError?: string }> {
   if (!isValidHttpUrl(url)) return { item: null };
 
-  const probed = await probeOne(url, false);
+  const normalized = normalizeMediaUrl(url);
+  const probed = await probeOne(normalized, false);
   if (probed.items?.length === 1) return { item: probed.items[0] };
   if (probed.items && probed.items.length > 1) return { item: probed.items[0] };
 
   if (Capacitor.getPlatform() === "android") {
-    const probedLoose = await probeOne(url, true);
+    const normalized = normalizeMediaUrl(url);
+    const probedLoose = await probeOne(normalized, true);
     if (probedLoose.items?.length) return { item: probedLoose.items[0] };
-    /* Do not queue blind downloads — probe must succeed so yt-dlp can extract the URL */
+    const probeErr = probedLoose.error ?? probed.error;
+    /* Probe often fails on xHamster while download still works after engine update */
+    if (isAdultMediaUrl(normalized) && isExtractorProbeError(probeErr)) {
+      return { item: fallbackItem(normalized) };
+    }
     return {
       item: null,
-      probeError: probedLoose.error ?? probed.error ?? undefined,
+      probeError: probeErr ?? undefined,
     };
   }
 

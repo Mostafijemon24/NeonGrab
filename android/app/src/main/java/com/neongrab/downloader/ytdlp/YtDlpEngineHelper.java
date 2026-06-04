@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class YtDlpEngineHelper {
 
     private static final int UPDATE_TIMEOUT_SEC = 90;
+    private static final int FORCE_UPDATE_TIMEOUT_SEC = 120;
     private static final Object LOCK = new Object();
     private static volatile boolean initialized;
     private static volatile boolean initSucceeded;
@@ -181,8 +182,8 @@ public final class YtDlpEngineHelper {
                 if (!updateAttempted) {
                     updateAttempted = true;
                     if (shouldCheckForUpdate(app)) {
-                        report(78, "Updating yt-dlp…");
-                        tryUpdateWithTimeout(app);
+                        report(78, "Updating yt-dlp (nightly)…");
+                        tryUpdateWithTimeout(app, YoutubeDL.UpdateChannel.NIGHTLY.INSTANCE, false);
                         recordUpdateCheck(app);
                     } else {
                         report(85, "Engine ready");
@@ -316,7 +317,7 @@ public final class YtDlpEngineHelper {
         return true;
     }
 
-    private static final long UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000L; // 6 hours
+    private static final long UPDATE_INTERVAL_MS = 2 * 60 * 60 * 1000L; // 2 hours
 
     /** Returns true if yt-dlp should be updated (first run or > 24 hours since last update). */
     private static boolean shouldCheckForUpdate(Context app) {
@@ -332,7 +333,22 @@ public final class YtDlpEngineHelper {
                 .apply();
     }
 
+    /** Pull latest nightly yt-dlp before adult-site extractors (xHamster changes often). */
+    static void ensureFreshYtDlpForSites(Context app) {
+        synchronized (LOCK) {
+            tryUpdateWithTimeout(app, YoutubeDL.UpdateChannel.NIGHTLY.INSTANCE, true);
+        }
+    }
+
     private static void tryUpdateWithTimeout(Context app) {
+        tryUpdateWithTimeout(app, YoutubeDL.UpdateChannel.NIGHTLY.INSTANCE, false);
+    }
+
+    private static void tryUpdateWithTimeout(
+            Context app, YoutubeDL.UpdateChannel channel, boolean force) {
+        if (!force && updateAttempted) {
+            return;
+        }
         AtomicBoolean done = new AtomicBoolean(false);
         Thread ticker =
                 new Thread(
@@ -359,10 +375,7 @@ public final class YtDlpEngineHelper {
                                 try {
                                     YoutubeDL.UpdateStatus status =
                                             YoutubeDL.getInstance()
-                                                    .updateYoutubeDL(
-                                                            app,
-                                                            YoutubeDL.UpdateChannel.STABLE
-                                                                    .INSTANCE);
+                                                    .updateYoutubeDL(app, channel);
                                     if (status == YoutubeDL.UpdateStatus.DONE
                                             || status
                                                     == YoutubeDL.UpdateStatus
@@ -373,7 +386,8 @@ public final class YtDlpEngineHelper {
                                     lastError = e.getMessage();
                                 }
                             });
-            future.get(UPDATE_TIMEOUT_SEC, TimeUnit.SECONDS);
+            int timeoutSec = force ? FORCE_UPDATE_TIMEOUT_SEC : UPDATE_TIMEOUT_SEC;
+            future.get(timeoutSec, TimeUnit.SECONDS);
         } catch (Exception e) {
             lastError =
                     e instanceof java.util.concurrent.TimeoutException
@@ -411,6 +425,30 @@ public final class YtDlpEngineHelper {
         ensureReady(context, 300);
         FfmpegBinaryHelper.ensurePatched(context.getApplicationContext());
         String probeUrl = cleanDownloadUrl(url);
+        boolean adult = isAdultSiteUrl(probeUrl.toLowerCase());
+        if (adult) {
+            ensureFreshYtDlpForSites(context.getApplicationContext());
+        }
+        try {
+            return executeJsonProbe(context, url, probeUrl, flatPlaylist);
+        } catch (Exception first) {
+            if (!adult) {
+                throw first;
+            }
+            ensureFreshYtDlpForSites(context.getApplicationContext());
+            try {
+                return executeJsonProbe(context, url, probeUrl, flatPlaylist);
+            } catch (Exception second) {
+                String friendly = YtDlpUserMessage.fromYtDlp(second.getMessage());
+                throw new Exception(
+                        friendly != null ? friendly : trimOutput(second.getMessage(), "Probe failed"));
+            }
+        }
+    }
+
+    private static String executeJsonProbe(
+            Context context, String originalUrl, String probeUrl, boolean flatPlaylist)
+            throws Exception {
         YoutubeDLRequest request = new YoutubeDLRequest(probeUrl);
         request.addOption("-J");
         request.addOption("--no-warnings");
@@ -419,7 +457,6 @@ public final class YtDlpEngineHelper {
         request.addOption("60");
 
         if (flatPlaylist) {
-            /* Playlist metadata only — skip player client args that can trigger bot checks */
             request.addOption("--flat-playlist");
             request.addOption("--ignore-errors");
             if (isYouTubeUrl(probeUrl.toLowerCase())) {
@@ -432,17 +469,18 @@ public final class YtDlpEngineHelper {
             addSiteCompatArgs(request, probeUrl);
         }
 
-        /* Merge stderr into stdout so we capture all yt-dlp output for error messages */
         YoutubeDLResponse response =
                 YtDlpProcessRunner.execute(
                         context,
                         request,
-                        "probe_" + Math.abs(url.hashCode()),
+                        "probe_" + Math.abs(originalUrl.hashCode()),
                         true,
                         null);
         if (response.getExitCode() != 0) {
             String combined = (response.getOut() + "\n" + response.getErr()).trim();
-            throw new Exception(trimOutput(combined, "Playlist probe failed"));
+            String friendly = YtDlpUserMessage.fromYtDlp(combined);
+            throw new Exception(
+                    friendly != null ? friendly : trimOutput(combined, "Playlist probe failed"));
         }
         String out = response.getOut().trim();
         if (out.isEmpty()) {
@@ -467,6 +505,9 @@ public final class YtDlpEngineHelper {
 
         String rawUrl = extraArgs.get(extraArgs.size() - 1);
         String url = cleanDownloadUrl(rawUrl);
+        if (isAdultSiteUrl(url.toLowerCase())) {
+            ensureFreshYtDlpForSites(app);
+        }
         YoutubeDLRequest request = new YoutubeDLRequest(url);
         request.addOption("--no-warnings");
         request.addOption("--no-cache-dir");
@@ -509,28 +550,84 @@ public final class YtDlpEngineHelper {
     private static String cleanDownloadUrl(String url) {
         if (url == null) return "";
         String u = url.trim();
-        // Normalize YouTube hosts
         if (u.contains("youtube.com/") || u.contains("youtu.be/")) {
             u = normalizeProbeUrl(u);
         }
-        // Strip common tracking params from the query string
+        u = normalizeAdultWatchUrl(u);
         try {
             android.net.Uri parsed = android.net.Uri.parse(u);
-            android.net.Uri.Builder b = parsed.buildUpon().clearQuery();
-            for (String key : parsed.getQueryParameterNames()) {
-                if (key.startsWith("utm_") || "fbclid".equals(key)
-                        || "si".equals(key) || "feature".equals(key)) {
-                    continue;
+            String path = parsed.getPath() != null ? parsed.getPath().toLowerCase() : "";
+            boolean stripAllQuery =
+                    isAdultSiteUrl(u.toLowerCase())
+                            && (path.contains("/videos/") || path.contains("/view_video"));
+            android.net.Uri.Builder b = parsed.buildUpon();
+            if (stripAllQuery) {
+                b.clearQuery();
+            } else {
+                b.clearQuery();
+                for (String key : parsed.getQueryParameterNames()) {
+                    if (isTrackingQueryKey(key)) {
+                        continue;
+                    }
+                    String val = parsed.getQueryParameter(key);
+                    if (val != null) b.appendQueryParameter(key, val);
                 }
-                String val = parsed.getQueryParameter(key);
-                if (val != null) b.appendQueryParameter(key, val);
             }
+            b.fragment(null);
             String cleaned = b.build().toString();
             if (cleaned != null && !cleaned.isEmpty()) return cleaned;
         } catch (Exception ignored) {
-            /* fall through to original */
+            /* fall through */
         }
         return u;
+    }
+
+    private static boolean isTrackingQueryKey(String key) {
+        if (key == null) return true;
+        String k = key.toLowerCase();
+        return k.startsWith("utm_")
+                || k.startsWith("utm")
+                || "fbclid".equals(k)
+                || "si".equals(k)
+                || "feature".equals(k)
+                || "ref".equals(k)
+                || "referer".equals(k)
+                || "referrer".equals(k)
+                || "referral".equals(k)
+                || "campaign".equals(k)
+                || "source".equals(k);
+    }
+
+    /** Canonical watch URL — referral query strings break xHamster/PornHub extractors. */
+    private static String normalizeAdultWatchUrl(String url) {
+        try {
+            android.net.Uri parsed = android.net.Uri.parse(url);
+            String host = parsed.getHost();
+            if (host == null) return url;
+            String lowerHost = host.toLowerCase();
+            String path = parsed.getPath() != null ? parsed.getPath() : "";
+            if (!isAdultSiteUrl((lowerHost + path).toLowerCase())) {
+                return url;
+            }
+            if (lowerHost.contains("xhamster")) {
+                host = "www.xhamster.com";
+            } else if (lowerHost.contains("pornhub")) {
+                host = "www.pornhub.com";
+            } else if (!host.startsWith("www.")) {
+                host = "www." + host;
+            }
+            if (path.contains("/videos/") || path.contains("/view_video")) {
+                return new android.net.Uri.Builder()
+                        .scheme("https")
+                        .authority(host)
+                        .path(path)
+                        .build()
+                        .toString();
+            }
+        } catch (Exception ignored) {
+            /* keep original */
+        }
+        return url;
     }
 
     private static String normalizeProbeUrl(String url) {
@@ -569,6 +666,17 @@ public final class YtDlpEngineHelper {
             request.addOption("--user-agent", DESKTOP_UA);
             request.addOption("--referer", "https://www.facebook.com/");
             request.addOption("--age-limit", "99");
+        } else if (isXhamsterUrl(lowerUrl)) {
+            request.addOption("--user-agent", DESKTOP_UA);
+            String referer = extractBaseReferer(url);
+            if (referer != null) {
+                request.addOption("--referer", referer);
+            }
+            request.addOption("--age-limit", "99");
+            request.addOption("--no-check-certificates");
+            request.addOption(
+                    "--add-header",
+                    "Cookie: age_verified=1; cookies_accepted=1; parental-control=no");
         } else if (isAdultSiteUrl(lowerUrl)) {
             /* PornHub/CDN need site-root Referer (not the watch URL) — see yt-dlp #15827 */
             request.addOption("--user-agent", DESKTOP_UA);
@@ -596,6 +704,10 @@ public final class YtDlpEngineHelper {
     private static boolean isFacebookUrl(String lowerUrl) {
         return lowerUrl.contains("facebook.com/") || lowerUrl.contains("fb.watch/")
                 || lowerUrl.contains("fb.com/");
+    }
+
+    private static boolean isXhamsterUrl(String lowerUrl) {
+        return lowerUrl != null && lowerUrl.contains("xhamster.");
     }
 
     static boolean isAdultSiteUrl(String lowerUrl) {

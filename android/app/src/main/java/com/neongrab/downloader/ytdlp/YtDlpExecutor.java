@@ -135,11 +135,19 @@ public class YtDlpExecutor {
 
                         if (saved == null || saved.length() == 0) {
                             String reason = extractFailureReason(log);
-                            emitter.emitFailed(
-                                    jobId,
+                            String failMsg =
                                     reason != null
-                                            ? reason
-                                            : tailLog(log, "Download failed — no media file saved"));
+                                            ? YtDlpUserMessage.fromYtDlp(reason)
+                                            : null;
+                            if (failMsg == null) {
+                                failMsg =
+                                        reason != null
+                                                ? reason
+                                                : tailLog(
+                                                        log,
+                                                        "Download failed — no media file saved");
+                            }
+                            emitter.emitFailed(jobId, failMsg);
                             return;
                         }
 
