@@ -669,7 +669,6 @@ public final class YtDlpEngineHelper {
             request.addOption("--referer", "https://www.facebook.com/");
             request.addOption("--age-limit", "99");
         } else if (isXhamsterUrl(lowerUrl)) {
-            request.addOption("--user-agent", DESKTOP_UA);
             String referer = extractBaseReferer(url);
             if (referer != null) {
                 request.addOption("--referer", referer);
@@ -677,19 +676,8 @@ public final class YtDlpEngineHelper {
             request.addOption("--age-limit", "99");
             request.addOption("--no-check-certificates");
             request.addOption("--geo-bypass");
-            request.addOption(
-                    "--add-header",
-                    "Cookie: "
-                            + "age_verified=1; "
-                            + "accessAgeDisclaimerPH=1; "
-                            + "accessAgeDisclaimerUK=1; "
-                            + "cookies_accepted=1; "
-                            + "cookie_banner=1; "
-                            + "parental-control=no; "
-                            + "x_accept_cookies=1");
         } else if (isAdultSiteUrl(lowerUrl)) {
             /* PornHub/CDN need site-root Referer (not the watch URL) — see yt-dlp #15827 */
-            request.addOption("--user-agent", DESKTOP_UA);
             String referer = extractBaseReferer(url);
             if (referer != null) {
                 request.addOption("--referer", referer);
