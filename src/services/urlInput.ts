@@ -16,10 +16,14 @@ export function extractUrlsFromText(raw: string): string[] {
 }
 
 function cleanUrlToken(token: string): string {
-  return token
+  let t = token
     .replace(/^[\s"'[(]+/, "")
     .replace(/[\s"'),.;!?]+$/, "")
     .trim();
+  /* Share links often append ?utm= / ?referral= — strip before probe */
+  const cut = t.search(/[?&](?:utm[\w-]*|um|fbclid|referral|campaign|source|medium)=/i);
+  if (cut > 0) t = t.slice(0, cut);
+  return t;
 }
 
 export function isValidHttpUrl(raw: string): boolean {

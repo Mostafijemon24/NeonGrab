@@ -121,17 +121,36 @@ export function normalizeMediaUrl(url: string): string {
   }
 }
 
+export function isDirectVideoPage(url: string): boolean {
+  try {
+    const path = new URL(url.trim()).pathname.toLowerCase();
+    if (/\/videos\/[^/]+/.test(path)) return true;
+    if (path.includes("/view_video")) return true;
+    if (path.includes("/watch") && !path.includes("/watchlist")) return true;
+    if (path.includes("/embed/")) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function isPlaylistUrl(url: string): boolean {
-  const u = url.toLowerCase();
-  return (
-    u.includes("list=") ||
-    u.includes("/playlist") ||
-    u.includes("/channel/") ||
-    u.includes("/user/") ||
-    (u.includes("/@") && u.includes("/videos")) ||
-    u.includes("album") ||
-    u.includes("/series/")
-  );
+  if (isDirectVideoPage(url)) return false;
+  try {
+    const u = new URL(url.trim());
+    const path = u.pathname.toLowerCase();
+    const qs = u.search.toLowerCase();
+    if (qs.includes("list=")) return true;
+    if (path.includes("/playlist")) return true;
+    if (path.includes("/channel/")) return true;
+    if (path.includes("/user/") && !path.includes("/videos/")) return true;
+    if (path.includes("/@") && path.includes("/videos")) return true;
+    if (path.includes("/series/")) return true;
+    if (/\/album(\/|$)/.test(path)) return true;
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function fallbackItem(url: string, index?: number): ResolvedItem {
@@ -159,17 +178,28 @@ async function resolveSingleUrl(
   if (!isValidHttpUrl(url)) return { item: null };
 
   const normalized = normalizeMediaUrl(url);
+
+  /* xHamster/PornHub: probe often fails (KeyError title) while download works — skip probe */
+  if (
+    Capacitor.getPlatform() === "android" &&
+    isAdultMediaUrl(normalized) &&
+    isDirectVideoPage(normalized)
+  ) {
+    return { item: fallbackItem(normalized) };
+  }
+
   const probed = await probeOne(normalized, false);
   if (probed.items?.length === 1) return { item: probed.items[0] };
   if (probed.items && probed.items.length > 1) return { item: probed.items[0] };
 
   if (Capacitor.getPlatform() === "android") {
-    const normalized = normalizeMediaUrl(url);
     const probedLoose = await probeOne(normalized, true);
     if (probedLoose.items?.length) return { item: probedLoose.items[0] };
     const probeErr = probedLoose.error ?? probed.error;
-    /* Probe often fails on xHamster while download still works after engine update */
     if (isAdultMediaUrl(normalized) && isExtractorProbeError(probeErr)) {
+      return { item: fallbackItem(normalized) };
+    }
+    if (isDirectVideoPage(normalized) && isExtractorProbeError(probeErr)) {
       return { item: fallbackItem(normalized) };
     }
     return {
@@ -178,7 +208,7 @@ async function resolveSingleUrl(
     };
   }
 
-  return { item: fallbackItem(url) };
+  return { item: fallbackItem(normalized) };
 }
 
 async function resolvePlaylistUrl(
@@ -240,11 +270,20 @@ export async function resolveMediaUrl(
   }
 
   const url = urls[0];
-  const wantPlaylist = forceBatch === true || (forceBatch !== false && isPlaylistUrl(url));
+  const normalized = normalizeMediaUrl(url);
+  const wantPlaylist =
+    forceBatch === true ||
+    (forceBatch !== false && isPlaylistUrl(normalized));
 
   if (wantPlaylist) {
-    const playlist = await resolvePlaylistUrl(url);
+    const playlist = await resolvePlaylistUrl(normalized);
     if (!playlist.items || playlist.items.length === 0) {
+      if (
+        Capacitor.getPlatform() === "android" &&
+        isDirectVideoPage(normalized)
+      ) {
+        return { ok: true, batch: false, item: fallbackItem(normalized) };
+      }
       return { ok: false, reason: "probeFailed", detail: playlist.detail };
     }
     if (playlist.items.length === 1) {

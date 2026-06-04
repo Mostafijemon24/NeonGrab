@@ -333,10 +333,11 @@ public final class YtDlpEngineHelper {
                 .apply();
     }
 
-    /** Pull latest nightly yt-dlp before adult-site extractors (xHamster changes often). */
+    /** Pull latest yt-dlp before adult-site extractors (xHamster changes often). */
     static void ensureFreshYtDlpForSites(Context app) {
         synchronized (LOCK) {
             tryUpdateWithTimeout(app, YoutubeDL.UpdateChannel.NIGHTLY.INSTANCE, true);
+            tryUpdateWithTimeout(app, YoutubeDL.UpdateChannel.MASTER.INSTANCE, true);
         }
     }
 
@@ -587,6 +588,7 @@ public final class YtDlpEngineHelper {
         String k = key.toLowerCase();
         return k.startsWith("utm_")
                 || k.startsWith("utm")
+                || "um".equals(k)
                 || "fbclid".equals(k)
                 || "si".equals(k)
                 || "feature".equals(k)
